@@ -227,6 +227,7 @@ async function run() {
     if (raw !== null) values.set("kinova.catalog", raw);
     let writes = 0;
     let failWrite = false;
+    let response = async () => ({ ok: true, json: async () => ({ films: [{ id: 90, nameRu: "Проверка" }] }) });
     const context = vm.createContext({
       URL, location: { protocol: "http:" }, AbortSignal,
       localStorage: {
@@ -234,10 +235,10 @@ async function run() {
         setItem(key, value) { writes++; if (failWrite) throw new Error("quota"); values.set(key, value); },
       },
       document: { querySelector: (selector) => pageNodes[selector.slice(1)], createElement: element },
-      fetch: async () => ({ ok: true, json: async () => ({ films: [{ id: 90, nameRu: "Проверка" }] }) }),
+      fetch: () => response(),
     });
     vm.runInContext(read("script.js"), context);
-    return { nodes: pageNodes, values, context, button: searchButton, writes: () => writes, failWrite: (value) => { failWrite = value; } };
+    return { nodes: pageNodes, values, context, button: searchButton, writes: () => writes, failWrite: (value) => { failWrite = value; }, respond: (value) => { response = value; } };
   }
   const validFilm = { id: 11, status: "planned", nameRu: "Первый фильм", nameOriginal: null, year: 2000, rating: 8, poster: null };
   const invalidRows = [null, { ...validFilm, id: "11" }, { ...validFilm, status: "other" },
@@ -285,6 +286,42 @@ async function run() {
   assert.equal(empty.nodes.watchlist.children.length, 1);
   assert.equal(empty.nodes["storage-status"].textContent, "");
   assert.equal(empty.values.get("unrelated"), "keep");
+
+  // Поиск после восстановления не записывает каталог и учитывает оба статуса.
+  const restoredRaw = JSON.stringify({ version: 1, films: [
+    { ...validFilm, id: 90 }, { ...validFilm, id: 91, status: "watched" },
+  ] });
+  const restoredPage = storagePage(restoredRaw);
+  const pageSubmit = () => restoredPage.nodes["search-form"].listeners.submit({ preventDefault() {} });
+  restoredPage.nodes.query.value = "фильм";
+  restoredPage.respond(async () => ({ ok: true, json: async () => ({ films: [{ id: 90 }, { id: 91 }] }) }));
+  await pageSubmit();
+  assert.equal(restoredPage.nodes.results.children[0].children[3].textContent, "В списке „Хочу посмотреть“");
+  assert.equal(restoredPage.nodes.results.children[1].children[3].textContent, "В списке „Просмотрено“");
+  const restoredSnapshot = () => JSON.stringify(["watchlist", "watched"].map((id) => ({
+    count: restoredPage.nodes[`${id}-count`].textContent,
+    films: restoredPage.nodes[id].children.map((card) => [card.dataset.filmId, card.children[1].textContent]),
+  })));
+  const beforeRestoredErrors = restoredSnapshot();
+  for (const failure of [
+    async () => ({ ok: true, json: async () => ({ films: [] }) }),
+    async () => { throw new Error("network"); },
+    async () => ({ ok: false, json: async () => ({ error: "API_LIMIT" }) }),
+  ]) {
+    restoredPage.respond(failure);
+    await pageSubmit();
+    assert.equal(restoredSnapshot(), beforeRestoredErrors);
+    assert.equal(restoredPage.values.get("kinova.catalog"), restoredRaw);
+    assert.equal(restoredPage.writes(), 0);
+  }
+  // Перенос восстановленного фильма сохраняется и виден при следующем открытии.
+  restoredPage.nodes.watchlist.children[0].children[3].listeners.click();
+  assert.equal(restoredPage.nodes.watched.children.length, 2);
+  const openedAgain = storagePage(restoredPage.values.get("kinova.catalog"));
+  assert.equal(openedAgain.nodes.watchlist.children.length, 0);
+  assert.deepEqual(openedAgain.nodes.watched.children.map((card) => card.dataset.filmId), [90, 91]);
+  assert.equal(openedAgain.nodes["watched-count"].textContent, "2");
+  assert.equal(openedAgain.nodes["watchlist-empty"].hidden, false);
 
   let timer;
   let timeoutMs;

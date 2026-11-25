@@ -38,7 +38,7 @@ h2 { margin: 0; font-size: 19px; font-weight: 550; }
 footer { display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid #343a35; padding-block: 24px; color: #9ba59b; font-size: 12px; }
 .catalog-section { border-top: 1px solid #343a35; padding-block: 28px 64px; }
 .catalog-section h3 { font-size: 18px; }
-#watchlist-count { color: #aeb9a7; margin-left: 8px; }
+#watchlist-count, #watched-count { color: #aeb9a7; margin-left: 8px; }
 .film-action { width: 100%; margin-top: 16px; white-space: normal; }
 .film-status { color: #c4e69b; line-height: 1.6; overflow-wrap: anywhere; }
 #catalog-status { color: #c4e69b; line-height: 1.6; }

@@ -8,49 +8,81 @@ const status = document.querySelector("#search-status");
 const results = document.querySelector("#results");
 const count = document.querySelector("#result-count");
 let searching = false;
-const watchlist = new Map();
-const watchlistElement = document.querySelector("#watchlist");
-const watchlistCount = document.querySelector("#watchlist-count");
-const watchlistEmpty = document.querySelector("#watchlist-empty");
+const catalog = new Map();
+const catalogLists = [
+  { status: "planned", id: "watchlist", title: "Хочу посмотреть", action: "Уже посмотрел", target: "watched" },
+  { status: "watched", id: "watched", title: "Просмотрено", action: "Хочу пересмотреть", target: "planned" },
+];
 const catalogStatus = document.querySelector("#catalog-status");
 let searchFilms = [];
 
-function renderWatchlist() {
-  watchlistElement.replaceChildren(...Array.from(watchlist.values()).reverse().map(createCard));
-  watchlistCount.textContent = String(watchlist.size);
-  watchlistEmpty.hidden = watchlist.size > 0;
+function renderCatalog(focusId) {
+  let focusTarget;
+  for (const list of catalogLists) {
+    const films = Array.from(catalog.values()).filter((film) => film.status === list.status).reverse();
+    document.querySelector(`#${list.id}`).replaceChildren(...films.map((film) => {
+      const card = createCard(film);
+      const move = document.createElement("button");
+      move.type = "button";
+      move.className = "film-action";
+      move.textContent = list.action;
+      move.addEventListener("click", () => moveFilm(film.id, list.target));
+      card.append(move);
+      if (film.id === focusId) focusTarget = move;
+      return card;
+    }));
+    document.querySelector(`#${list.id}-count`).textContent = String(films.length);
+    document.querySelector(`#${list.id}-empty`).hidden = films.length > 0;
+  }
+  focusTarget?.focus();
 }
 
 function renderSearch(focusId) {
   let focusTarget;
   results.replaceChildren(...searchFilms.map((film) => {
     const card = createCard(film);
-    if (watchlist.has(film.id)) {
+    if (catalog.has(film.id)) {
       const label = document.createElement("p");
       label.className = "film-status";
-      label.textContent = "В списке „Хочу посмотреть“";
+      label.textContent = `В списке „${catalogLists.find((list) => list.status === catalog.get(film.id).status).title}“`;
       label.tabIndex = -1;
       card.append(label);
       if (film.id === focusId && !focusTarget) focusTarget = label;
     } else if (Number.isSafeInteger(film.id) && film.id > 0) {
-      const add = document.createElement("button");
-      add.type = "button";
-      add.className = "film-action";
-      add.textContent = "Хочу посмотреть";
-      add.addEventListener("click", () => addToWatchlist(film));
-      card.append(add);
+      for (const list of catalogLists) {
+        const add = document.createElement("button");
+        add.type = "button";
+        add.className = "film-action";
+        add.textContent = list.title;
+        add.addEventListener("click", () => addToCatalog(film, list.status));
+        card.append(add);
+      }
     }
     return card;
   }));
   focusTarget?.focus();
 }
 
-function addToWatchlist(film) {
-  if (!Number.isSafeInteger(film.id) || film.id <= 0 || watchlist.has(film.id)) return;
-  watchlist.set(film.id, { ...film });
-  renderWatchlist();
+function addToCatalog(film, target) {
+  if (!Number.isSafeInteger(film.id) || film.id <= 0 || catalog.has(film.id)) return;
+  const list = catalogLists.find((item) => item.status === target);
+  if (!list) return;
+  catalog.set(film.id, { ...film, status: target });
+  renderCatalog();
   renderSearch(film.id);
-  catalogStatus.textContent = "Фильм добавлен в „Хочу посмотреть“";
+  catalogStatus.textContent = `Фильм добавлен в „${list.title}“`;
+}
+
+function moveFilm(id, target) {
+  const film = catalog.get(id);
+  const list = catalogLists.find((item) => item.status === target);
+  if (!film || !list || film.status === target) return;
+  // Повторная вставка ставит перенесённую запись в начало нового списка.
+  catalog.delete(id);
+  catalog.set(id, { ...film, status: target });
+  renderSearch();
+  renderCatalog(id);
+  catalogStatus.textContent = `Фильм перенесён в „${list.title}“`;
 }
 
 function createCard(film) {

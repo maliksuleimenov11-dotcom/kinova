@@ -15,12 +15,12 @@ function element() {
     removeAttribute(name) { delete this.attrs[name]; },
     replaceChildren(...children) { this.children = children; },
     append(...children) { this.children.push(...children); },
-    focus() {},
+    focus() { this.focused = true; },
   };
 }
 
 async function run() {
-  const nodes = Object.fromEntries(["search-form", "query", "input-error", "search-status", "results", "result-count", "watchlist", "watchlist-count", "watchlist-empty", "catalog-status"].map((id) => [id, element()]));
+  const nodes = Object.fromEntries(["search-form", "query", "input-error", "search-status", "results", "result-count", "watchlist", "watchlist-count", "watchlist-empty", "watched", "watched-count", "watched-empty", "catalog-status"].map((id) => [id, element()]));
   const button = element();
   nodes["search-form"].querySelector = () => button;
   let requests = 0;
@@ -81,6 +81,22 @@ async function run() {
   assert.equal(nodes.watchlist.children.length, 2);
   assert.equal(nodes.watchlist.children[0].dataset.filmId, 4);
   assert.equal(nodes.watchlist.children[1].dataset.filmId, 1);
+  const beforeMove = requests;
+  const moveFirst = nodes.watchlist.children[0].children[3].listeners.click;
+  moveFirst();
+  moveFirst();
+  assert.equal(nodes.watchlist.children.length, 1);
+  assert.equal(nodes.watched.children.length, 1);
+  assert.equal(nodes["watched-count"].textContent, "1");
+  assert.equal(nodes["watchlist-count"].textContent, "1");
+  assert.equal(nodes.results.children[1].children[3].textContent, "В списке „Просмотрено“");
+  assert.equal(nodes.watched.children[0].children[3].focused, true);
+  nodes.watched.children[0].children[3].listeners.click();
+  assert.equal(nodes.watchlist.children.length, 2);
+  assert.equal(nodes.watched.children.length, 0);
+  assert.equal(nodes["watched-empty"].hidden, false);
+  assert.equal(nodes.watchlist.children[0].dataset.filmId, 4);
+  assert.equal(requests, beforeMove);
   reply = async () => ({ ok: true, json: async () => ({ films: [] }) });
   await submit();
   assert.equal(nodes.results.children.length, 0);
@@ -109,6 +125,17 @@ async function run() {
   await submit();
   ready();
   assert.equal(nodes.results.children[0].children[1].textContent, "Повторный поиск");
+  const directWatched = nodes.results.children[0].children[4].listeners.click;
+  directWatched();
+  directWatched();
+  assert.equal(nodes.watched.children.length, 1);
+  assert.equal(nodes.watchlist.children.length, 2);
+  assert.equal(nodes.results.children[0].children[3].textContent, "В списке „Просмотрено“");
+  assert.equal(nodes.results.children[0].children[3].focused, true);
+  nodes.watchlist.children[1].children[3].listeners.click();
+  assert.equal(nodes.watched.children[0].dataset.filmId, 1);
+  assert.equal(nodes.watched.children[1].dataset.filmId, 3);
+  assert.equal(nodes.watchlist.children.length + nodes.watched.children.length, 3);
 
   let timer;
   let timeoutMs;
@@ -160,7 +187,7 @@ async function run() {
   environment.KINOPOISK_API_KEY = "";
   assert.equal((await request()).body.error, "UNAVAILABLE");
   assert.equal(apiRequests, before + 1);
-  return "Пройдены проверки поиска, ошибок, тайм-аута и списка «Хочу посмотреть» без дублей. Запросов к настоящему API не было.";
+  return "Пройдены проверки поиска, ошибок, двух списков, переноса и защиты от дублей. Запросов к настоящему API не было.";
 }
 
 if (require.main === module) {

@@ -219,6 +219,73 @@ async function run() {
   assert.equal(freshNodes.watchlist.children.length + freshNodes.watched.children.length, 4);
   assert(read("index.html").includes("Каталог сохраняется в этом браузере"));
 
+  function storagePage(raw, readFails = false) {
+    const pageNodes = Object.fromEntries(Object.keys(nodes).map((id) => [id, element()]));
+    const searchButton = element();
+    pageNodes["search-form"].querySelector = () => searchButton;
+    const values = new Map([["unrelated", "keep"]]);
+    if (raw !== null) values.set("kinova.catalog", raw);
+    let writes = 0;
+    let failWrite = false;
+    const context = vm.createContext({
+      URL, location: { protocol: "http:" }, AbortSignal,
+      localStorage: {
+        getItem(key) { if (readFails) throw new Error("denied"); return values.get(key) ?? null; },
+        setItem(key, value) { writes++; if (failWrite) throw new Error("quota"); values.set(key, value); },
+      },
+      document: { querySelector: (selector) => pageNodes[selector.slice(1)], createElement: element },
+      fetch: async () => ({ ok: true, json: async () => ({ films: [{ id: 90, nameRu: "Проверка" }] }) }),
+    });
+    vm.runInContext(read("script.js"), context);
+    return { nodes: pageNodes, values, context, button: searchButton, writes: () => writes, failWrite: (value) => { failWrite = value; } };
+  }
+  const validFilm = { id: 11, status: "planned", nameRu: "Первый фильм", nameOriginal: null, year: 2000, rating: 8, poster: null };
+  const invalidRows = [null, { ...validFilm, id: "11" }, { ...validFilm, status: "other" },
+    { ...validFilm, nameRu: 123 }, { ...validFilm, year: 2000.5 }, { ...validFilm, rating: 11 },
+    { ...validFilm, poster: "javascript:alert(1)" }, { ...validFilm, poster: "https://user:password@example.org/a.jpg" }];
+  const invalidRaw = ["{broken", "null", "[]", JSON.stringify({ version: 2, films: [] }),
+    JSON.stringify({ version: 1, films: {} }), ...invalidRows.map((film) => JSON.stringify({ version: 1, films: [validFilm, film] }))];
+  for (const raw of invalidRaw) {
+    const page = storagePage(raw);
+    assert.equal(page.nodes.watchlist.children.length, 0);
+    assert(page.nodes["storage-status"].textContent.startsWith("Не удалось восстановить каталог"));
+    page.nodes.query.value = "фильм";
+    await page.nodes["search-form"].listeners.submit({ preventDefault() {} });
+    assert.equal(page.nodes.results.children.length, 1);
+    assert.equal(page.nodes.results.children[0].children[3].disabled, true);
+    assert.equal(page.button.disabled, false);
+    vm.runInContext('addToCatalog({ id: 90 }, "planned")', page.context);
+    assert.equal(page.writes(), 0);
+    assert.equal(page.values.get("kinova.catalog"), raw);
+    assert.equal(page.values.get("unrelated"), "keep");
+  }
+  const unreadable = storagePage(JSON.stringify({ version: 1, films: [validFilm] }), true);
+  assert(unreadable.nodes["storage-status"].textContent.startsWith("Не удалось прочитать каталог"));
+  vm.runInContext('addToCatalog({ id: 90 }, "planned")', unreadable.context);
+  assert.equal(unreadable.writes(), 0);
+  const recovered = storagePage(unreadable.values.get("kinova.catalog"));
+  assert.equal(recovered.nodes.watchlist.children.length, 1);
+  const duplicateRaw = JSON.stringify({ version: 1, films: [validFilm, { ...validFilm, status: "watched", nameRu: "Повтор" }] });
+  const duplicates = storagePage(duplicateRaw);
+  assert.equal(duplicates.nodes.watchlist.children.length, 1);
+  assert.equal(duplicates.nodes.watched.children.length, 0);
+  assert.equal(duplicates.nodes.watchlist.children[0].children[1].textContent, "Первый фильм");
+  assert.equal(duplicates.nodes["storage-status"].textContent, "Повторяющиеся фильмы объединены");
+  assert.equal(duplicates.values.get("kinova.catalog"), duplicateRaw);
+  const empty = storagePage(null);
+  assert.equal(empty.nodes["storage-status"].textContent, "");
+  assert.equal(empty.nodes["watchlist-count"].textContent, "0");
+  empty.failWrite(true);
+  vm.runInContext('addToCatalog({ id: 90 }, "planned")', empty.context);
+  assert.equal(empty.nodes.watchlist.children.length, 0);
+  assert.equal(empty.values.has("kinova.catalog"), false);
+  assert(empty.nodes["storage-status"].textContent.startsWith("Не удалось сохранить изменения"));
+  empty.failWrite(false);
+  vm.runInContext('addToCatalog({ id: 90 }, "planned")', empty.context);
+  assert.equal(empty.nodes.watchlist.children.length, 1);
+  assert.equal(empty.nodes["storage-status"].textContent, "");
+  assert.equal(empty.values.get("unrelated"), "keep");
+
   let timer;
   let timeoutMs;
   let cleared = 0;

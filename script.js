@@ -8,6 +8,50 @@ const status = document.querySelector("#search-status");
 const results = document.querySelector("#results");
 const count = document.querySelector("#result-count");
 let searching = false;
+const watchlist = new Map();
+const watchlistElement = document.querySelector("#watchlist");
+const watchlistCount = document.querySelector("#watchlist-count");
+const watchlistEmpty = document.querySelector("#watchlist-empty");
+const catalogStatus = document.querySelector("#catalog-status");
+let searchFilms = [];
+
+function renderWatchlist() {
+  watchlistElement.replaceChildren(...Array.from(watchlist.values()).reverse().map(createCard));
+  watchlistCount.textContent = String(watchlist.size);
+  watchlistEmpty.hidden = watchlist.size > 0;
+}
+
+function renderSearch(focusId) {
+  let focusTarget;
+  results.replaceChildren(...searchFilms.map((film) => {
+    const card = createCard(film);
+    if (watchlist.has(film.id)) {
+      const label = document.createElement("p");
+      label.className = "film-status";
+      label.textContent = "В списке „Хочу посмотреть“";
+      label.tabIndex = -1;
+      card.append(label);
+      if (film.id === focusId && !focusTarget) focusTarget = label;
+    } else if (Number.isSafeInteger(film.id) && film.id > 0) {
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "film-action";
+      add.textContent = "Хочу посмотреть";
+      add.addEventListener("click", () => addToWatchlist(film));
+      card.append(add);
+    }
+    return card;
+  }));
+  focusTarget?.focus();
+}
+
+function addToWatchlist(film) {
+  if (!Number.isSafeInteger(film.id) || film.id <= 0 || watchlist.has(film.id)) return;
+  watchlist.set(film.id, { ...film });
+  renderWatchlist();
+  renderSearch(film.id);
+  catalogStatus.textContent = "Фильм добавлен в „Хочу посмотреть“";
+}
 
 function createCard(film) {
   const card = document.createElement("article");
@@ -58,6 +102,7 @@ form.addEventListener("submit", async (event) => {
   button.disabled = true;
   results.setAttribute("aria-busy", "true");
   results.replaceChildren();
+  searchFilms = [];
   count.textContent = "";
   status.textContent = "Ищем фильмы…";
   try {
@@ -79,7 +124,8 @@ form.addEventListener("submit", async (event) => {
       return;
     }
     if (!Array.isArray(data.films)) throw new Error("Invalid response");
-    results.replaceChildren(...data.films.map(createCard));
+    searchFilms = data.films;
+    renderSearch();
     status.textContent = data.films.length ? "" : "Ничего не найдено. Попробуйте другое название";
     count.textContent = `На этой странице: ${data.films.length}`;
   } catch {

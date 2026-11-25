@@ -107,11 +107,17 @@ function renderCatalog(focusId) {
       const edit = document.createElement("button");
       edit.type = "button";
       edit.className = "film-action";
-      edit.textContent = "Моя оценка";
+      edit.textContent = "Оценка и отзыв";
       edit.disabled = catalogLocked;
       edit.addEventListener("click", () => openRatingEditor(film.id));
       card.append(personal, edit);
       if (ratingEditor?.id === film.id) card.append(ratingEditor.form);
+      if (film.review) {
+        const review = document.createElement("p");
+        review.className = "film-review";
+        review.textContent = `Мой отзыв: ${film.review}`;
+        card.append(review);
+      }
       if (film.id === focusId) focusTarget = move;
       return card;
     }));
@@ -133,6 +139,10 @@ function closeRatingEditor(id) {
 
 function openRatingEditor(id) {
   if (catalogLocked || !catalog.has(id)) return;
+  if (ratingEditor?.id === id) {
+    ratingEditor.select.focus();
+    return;
+  }
   const film = catalog.get(id);
   const editorForm = document.createElement("form");
   editorForm.className = "rating-form";
@@ -157,6 +167,28 @@ function openRatingEditor(id) {
   validation.className = "error";
   validation.setAttribute("role", "alert");
   select.setAttribute("aria-describedby", validation.id);
+  const reviewLabel = document.createElement("label");
+  reviewLabel.htmlFor = `review-${id}`;
+  reviewLabel.textContent = "Отзыв";
+  const reviewInput = document.createElement("textarea");
+  reviewInput.id = reviewLabel.htmlFor;
+  reviewInput.rows = 5;
+  reviewInput.value = film.review || "";
+  const reviewCount = document.createElement("p");
+  reviewCount.id = `review-count-${id}`;
+  reviewCount.className = "demo-note";
+  const reviewError = document.createElement("p");
+  reviewError.id = `review-error-${id}`;
+  reviewError.className = "error";
+  reviewError.setAttribute("role", "alert");
+  reviewInput.setAttribute("aria-describedby", `${reviewCount.id} ${reviewError.id}`);
+  function updateReviewCount() {
+    reviewCount.textContent = `${Array.from(reviewInput.value.trim()).length} / 500`;
+    reviewError.textContent = "";
+    reviewInput.removeAttribute("aria-invalid");
+  }
+  reviewInput.addEventListener("input", updateReviewCount);
+  updateReviewCount();
   const save = document.createElement("button");
   save.type = "submit";
   save.textContent = "Сохранить";
@@ -164,7 +196,7 @@ function openRatingEditor(id) {
   cancel.type = "button";
   cancel.textContent = "Отмена";
   cancel.addEventListener("click", () => closeRatingEditor(id));
-  editorForm.append(note, label, select, validation, save, cancel);
+  editorForm.append(note, label, select, validation, reviewLabel, reviewInput, reviewCount, reviewError, save, cancel);
   editorForm.addEventListener("submit", (event) => {
     event.preventDefault();
     if (catalogLocked || ratingEditor?.form !== editorForm) return;
@@ -176,13 +208,22 @@ function openRatingEditor(id) {
     }
     validation.textContent = "";
     select.removeAttribute("aria-invalid");
+    const review = reviewInput.value.trim();
+    if (Array.from(review).length > 500) {
+      reviewError.textContent = "Отзыв должен быть не длиннее 500 символов";
+      reviewInput.setAttribute("aria-invalid", "true");
+      reviewInput.focus();
+      return;
+    }
+    reviewError.textContent = "";
+    reviewInput.removeAttribute("aria-invalid");
     const next = new Map(catalog);
-    next.set(id, { ...catalog.get(id), personalRating: select.value === "" ? null : Number(select.value) });
+    next.set(id, { ...catalog.get(id), personalRating: select.value === "" ? null : Number(select.value), review });
     if (!saveCatalog(next)) return;
     closeRatingEditor(id);
-    catalogStatus.textContent = "Оценка сохранена";
+    catalogStatus.textContent = "Оценка и отзыв сохранены";
   });
-  ratingEditor = { id, form: editorForm };
+  ratingEditor = { id, form: editorForm, select };
   renderCatalog();
   select.focus();
 }

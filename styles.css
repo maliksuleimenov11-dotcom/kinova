@@ -43,6 +43,9 @@ footer { display: flex; justify-content: space-between; gap: 12px; border-top: 1
 .rating-form { margin-top: 16px; border: 1px solid #4b554a; padding: 12px; border-radius: 10px; }
 .rating-form select { width: 100%; min-height: 44px; padding: 8px; font: inherit; color: inherit; background: #202622; border: 1px solid #4b554a; border-radius: 6px; }
 .rating-form button { width: 100%; margin-top: 10px; min-width: 44px; }
+.rating-form textarea { display: block; width: 100%; min-height: 110px; padding: 10px; resize: vertical; font: inherit; color: inherit; background: #202622; border: 1px solid #4b554a; border-radius: 6px; }
+.rating-form label { margin-top: 12px; }
+.film-review { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; color: #d6ddd3; }
 .film-status { color: #c4e69b; line-height: 1.6; overflow-wrap: anywhere; }
 #catalog-status { color: #c4e69b; line-height: 1.6; }
 #catalog-status:empty { display: none; }

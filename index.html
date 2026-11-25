@@ -16,10 +16,10 @@
       <p class="description">Найдите фильм для следующего вечера.<br>Скоро здесь можно будет собирать свою коллекцию.</p>
       <form id="search-form" novalidate>
         <label for="query">Название фильма</label>
-        <div class="search-row"><input id="query" name="query" type="search" placeholder="Например, Матрица" aria-describedby="demo-note input-error"><button type="submit">Найти <span aria-hidden="true">↗</span></button></div>
+        <div class="search-row"><input id="query" name="query" type="search" maxlength="200" placeholder="Например, Матрица" aria-describedby="search-note input-error"><button type="submit">Найти <span aria-hidden="true">↗</span></button></div>
         <p id="input-error" class="error" role="alert"></p>
       </form>
-      <p id="demo-note" class="demo-note"><span aria-hidden="true">○</span> Тестовый режим · API ещё не подключён. Попробуйте «Матрица» или «Дюна».</p>
+      <p id="search-note" class="demo-note"><span aria-hidden="true">○</span> Поиск через Kinopoisk API Unofficial · Показываем первую страницу результатов.</p>
     </section>
     <section class="results-section" aria-labelledby="results-title">
       <div class="results-heading"><h2 id="results-title">Результаты поиска</h2><span id="result-count"></span></div>

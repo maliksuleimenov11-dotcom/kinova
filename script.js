@@ -1,18 +1,5 @@
 "use strict";
 
-// Только локальные учебные данные. Сетевых запросов и API-ключа здесь нет.
-function demoPoster(title, color) {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="900" viewBox="0 0 600 900"><rect width="600" height="900" fill="${color}"/><circle cx="430" cy="280" r="190" fill="#ffffff" opacity=".08"/><path d="M0 720 600 350V900H0Z" fill="#000000" opacity=".3"/><text x="44" y="690" fill="#f3f0e9" font-family="sans-serif" font-size="50" font-weight="bold">${title}</text><text x="46" y="740" fill="#f3f0e9" font-family="sans-serif" font-size="18">УЧЕБНЫЙ ПОСТЕР</text></svg>`;
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-}
-
-const demoFilms = [
-  { id: 301, nameRu: "Матрица", year: 1999, rating: 8.5, poster: demoPoster("МАТРИЦА", "#294b3a") },
-  { id: 304, nameRu: "Матрица: Перезагрузка", year: 2003, rating: 7.7, poster: demoPoster("ПЕРЕЗАГРУЗКА", "#344b4e") },
-  { id: 305, nameRu: "Матрица: Революция", year: 2003, rating: null, poster: null },
-  { id: 409424, nameRu: "Дюна", year: 2021, rating: 7.7, poster: demoPoster("ДЮНА", "#78583c") },
-];
-
 const form = document.querySelector("#search-form");
 const input = document.querySelector("#query");
 const button = form.querySelector("button");
@@ -59,8 +46,8 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (searching) return;
   const query = input.value.trim();
-  if (!query) {
-    error.textContent = "Введите название фильма";
+  if (!query || query.length > 200) {
+    error.textContent = query ? "Название должно быть не длиннее 200 символов" : "Введите название фильма";
     input.setAttribute("aria-invalid", "true");
     input.focus();
     return;
@@ -73,13 +60,33 @@ form.addEventListener("submit", async (event) => {
   results.replaceChildren();
   count.textContent = "";
   status.textContent = "Ищем фильмы…";
-  // Короткая задержка позволяет проверить состояние загрузки без API.
-  await new Promise((resolve) => setTimeout(resolve, 450));
-  const films = demoFilms.filter((film) => (film.nameRu || film.nameOriginal || "").toLocaleLowerCase("ru").includes(query.toLocaleLowerCase("ru")));
-  results.replaceChildren(...films.map(createCard));
-  status.textContent = films.length ? "Показаны тестовые данные. Рейтинги приведены для примера." : "Ничего не найдено. Попробуйте другое название";
-  count.textContent = `Найдено: ${films.length}`;
-  results.setAttribute("aria-busy", "false");
-  button.disabled = false;
-  searching = false;
+  try {
+    if (location.protocol === "file:") {
+      status.textContent = "Для поиска откройте сайт через http://localhost:3000. Инструкция запуска — в README.";
+      return;
+    }
+    const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`, {
+      signal: AbortSignal.timeout(12000),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      const messages = {
+        API_LIMIT: "Лимит API исчерпан. Попробуйте позже",
+        UNAVAILABLE: "Поиск временно недоступен",
+        INVALID_QUERY: "Введите название фильма длиной до 200 символов",
+      };
+      status.textContent = messages[data.error] || "Не удалось выполнить поиск. Проверьте соединение и попробуйте ещё раз";
+      return;
+    }
+    if (!Array.isArray(data.films)) throw new Error("Invalid response");
+    results.replaceChildren(...data.films.map(createCard));
+    status.textContent = data.films.length ? "" : "Ничего не найдено. Попробуйте другое название";
+    count.textContent = `На этой странице: ${data.films.length}`;
+  } catch {
+    status.textContent = "Не удалось выполнить поиск. Проверьте соединение и попробуйте ещё раз";
+  } finally {
+    results.setAttribute("aria-busy", "false");
+    button.disabled = false;
+    searching = false;
+  }
 });

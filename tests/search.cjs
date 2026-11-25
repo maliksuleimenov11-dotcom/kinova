@@ -136,6 +136,55 @@ async function run() {
   assert.equal(nodes.watched.children[0].dataset.filmId, 1);
   assert.equal(nodes.watched.children[1].dataset.filmId, 3);
   assert.equal(nodes.watchlist.children.length + nodes.watched.children.length, 3);
+  assert.equal(nodes["catalog-status"].textContent, "Фильм перенесён в „Просмотрено“");
+  const savedCards = () => JSON.stringify([nodes.watchlist, nodes.watched].map((list) => list.children.map((item) => ({
+    id: item.dataset.filmId,
+    title: item.children[1].textContent,
+    meta: item.children[2].children.map((field) => field.textContent),
+  }))));
+  const beforeErrors = savedCards();
+  const beforeErrorsCount = [nodes["watchlist-count"].textContent, nodes["watched-count"].textContent];
+  for (const nextReply of [
+    async () => ({ ok: true, json: async () => ({ films: [] }) }),
+    async () => { throw new Error("network"); },
+    async () => ({ ok: false, json: async () => ({ error: "API_LIMIT" }) }),
+  ]) {
+    reply = nextReply;
+    await submit();
+    assert.equal(savedCards(), beforeErrors);
+    assert.deepEqual([nodes["watchlist-count"].textContent, nodes["watched-count"].textContent], beforeErrorsCount);
+  }
+  const requestsBeforeOfflineMove = requests;
+  nodes.watched.children[0].children[3].listeners.click();
+  assert.equal(requests, requestsBeforeOfflineMove);
+  assert.equal(nodes.watchlist.children[0].dataset.filmId, 1);
+  assert.equal(nodes.watchlist.children[0].children[1].textContent, "Original");
+  assert.equal(nodes.watchlist.children[0].children[2].children[0].textContent, "Год не указан");
+  assert.equal(nodes["catalog-status"].textContent, "Фильм перенесён в „Хочу посмотреть“");
+  reply = async () => ({ ok: true, json: async () => ({ films: [
+    { id: 0 }, { id: -1 }, { id: 1.5 }, { id: "5" },
+    { id: 7, nameRu: "Один фильм" }, { id: 7, nameRu: "Другой вариант названия" },
+  ] }) });
+  await submit();
+  for (const invalidCard of nodes.results.children.slice(0, 4)) assert.equal(invalidCard.children.length, 3);
+  const firstDuplicate = nodes.results.children[4].children[3].listeners.click;
+  const secondDuplicate = nodes.results.children[5].children[4].listeners.click;
+  firstDuplicate();
+  secondDuplicate();
+  assert.equal(nodes.watchlist.children.length + nodes.watched.children.length, 4);
+  assert.equal(nodes.results.children[4].children[3].textContent, "В списке „Хочу посмотреть“");
+  assert.equal(nodes.results.children[5].children[3].textContent, "В списке „Хочу посмотреть“");
+  assert.equal(nodes["catalog-status"].textContent, "Фильм добавлен в „Хочу посмотреть“");
+
+  // Новый контекст страницы не получает данные из предыдущей сессии.
+  const freshNodes = Object.fromEntries(Object.keys(nodes).map((id) => [id, element()]));
+  freshNodes["search-form"].querySelector = () => element();
+  vm.runInNewContext(read("script.js"), {
+    document: { querySelector: (selector) => freshNodes[selector.slice(1)], createElement: element },
+  });
+  assert.equal(freshNodes.watchlist.children.length, 0);
+  assert.equal(freshNodes.watched.children.length, 0);
+  assert(read("index.html").includes("Пока хранится только до перезагрузки страницы"));
 
   let timer;
   let timeoutMs;

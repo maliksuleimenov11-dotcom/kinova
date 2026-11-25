@@ -20,13 +20,20 @@ function element() {
 }
 
 async function run() {
-  const nodes = Object.fromEntries(["search-form", "query", "input-error", "search-status", "results", "result-count", "watchlist", "watchlist-count", "watchlist-empty", "watched", "watched-count", "watched-empty", "catalog-status"].map((id) => [id, element()]));
+  const nodes = Object.fromEntries(["search-form", "query", "input-error", "search-status", "results", "result-count", "watchlist", "watchlist-count", "watchlist-empty", "watched", "watched-count", "watched-empty", "catalog-status", "storage-status"].map((id) => [id, element()]));
+  const stored = new Map([["unrelated", "keep"]]);
+  let writeFails = false;
+  const storage = {
+    getItem(key) { return stored.get(key) ?? null; },
+    setItem(key, value) { if (writeFails) throw new Error("quota"); stored.set(key, value); },
+  };
   const button = element();
   nodes["search-form"].querySelector = () => button;
   let requests = 0;
   let reply = async () => ({ ok: true, json: async () => ({ films: [] }) });
   let clientTimeout;
   const client = vm.createContext({
+    localStorage: storage, URL,
     document: { querySelector: (selector) => nodes[selector.slice(1)], createElement: element },
     location: { protocol: "http:" },
     AbortSignal: { timeout(ms) { clientTimeout = ms; return new AbortController().signal; } },
@@ -176,15 +183,41 @@ async function run() {
   assert.equal(nodes.results.children[5].children[3].textContent, "В списке „Хочу посмотреть“");
   assert.equal(nodes["catalog-status"].textContent, "Фильм добавлен в „Хочу посмотреть“");
 
-  // Новый контекст страницы не получает данные из предыдущей сессии.
+  // Сбой записи не меняет интерфейс, порядок или прежнюю строку в хранилище.
+  const beforeFailedMove = savedCards();
+  const storedBeforeFailure = stored.get("kinova.catalog");
+  const retryMove = nodes.watchlist.children[0].children[3].listeners.click;
+  writeFails = true;
+  retryMove();
+  assert.equal(savedCards(), beforeFailedMove);
+  assert.equal(stored.get("kinova.catalog"), storedBeforeFailure);
+  assert(nodes["storage-status"].textContent.startsWith("Не удалось сохранить изменения"));
+  assert.equal(nodes["catalog-status"].textContent, "");
+  writeFails = false;
+  retryMove();
+  assert.equal(nodes["storage-status"].textContent, "");
+  assert.equal(nodes.watched.children[0].dataset.filmId, 7);
+  assert.equal(stored.get("unrelated"), "keep");
+
+  // Новый контекст страницы восстанавливает оба списка без API.
   const freshNodes = Object.fromEntries(Object.keys(nodes).map((id) => [id, element()]));
   freshNodes["search-form"].querySelector = () => element();
-  vm.runInNewContext(read("script.js"), {
+  const freshContext = vm.createContext({
+    localStorage: storage, URL,
     document: { querySelector: (selector) => freshNodes[selector.slice(1)], createElement: element },
   });
-  assert.equal(freshNodes.watchlist.children.length, 0);
-  assert.equal(freshNodes.watched.children.length, 0);
-  assert(read("index.html").includes("Пока хранится только до перезагрузки страницы"));
+  vm.runInContext(read("script.js"), freshContext);
+  for (const id of ["watchlist", "watched"]) {
+    assert.deepEqual(freshNodes[id].children.map((item) => item.dataset.filmId), nodes[id].children.map((item) => item.dataset.filmId));
+    assert.equal(freshNodes[`${id}-count`].textContent, nodes[`${id}-count`].textContent);
+    assert.equal(freshNodes[`${id}-empty`].hidden, nodes[`${id}-empty`].hidden);
+  }
+  assert.equal(freshNodes["storage-status"].textContent, "");
+  const beforeRestoredDuplicate = stored.get("kinova.catalog");
+  vm.runInContext('addToCatalog({ id: 7, nameRu: "Повтор" }, "planned")', freshContext);
+  assert.equal(stored.get("kinova.catalog"), beforeRestoredDuplicate);
+  assert.equal(freshNodes.watchlist.children.length + freshNodes.watched.children.length, 4);
+  assert(read("index.html").includes("Каталог сохраняется в этом браузере"));
 
   let timer;
   let timeoutMs;
@@ -236,7 +269,7 @@ async function run() {
   environment.KINOPOISK_API_KEY = "";
   assert.equal((await request()).body.error, "UNAVAILABLE");
   assert.equal(apiRequests, before + 1);
-  return "Пройдены проверки поиска, ошибок, двух списков, переноса и защиты от дублей. Запросов к настоящему API не было.";
+  return "Пройдены проверки поиска, списков, сохранения, восстановления и ошибки записи. Запросов к настоящему API не было.";
 }
 
 if (require.main === module) {

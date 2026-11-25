@@ -8,13 +8,79 @@ const status = document.querySelector("#search-status");
 const results = document.querySelector("#results");
 const count = document.querySelector("#result-count");
 let searching = false;
-const catalog = new Map();
+let catalog = new Map();
+const storageKey = "kinova.catalog";
+let catalogLocked = false;
+const storageStatus = document.querySelector("#storage-status");
 const catalogLists = [
   { status: "planned", id: "watchlist", title: "Хочу посмотреть", action: "Уже посмотрел", target: "watched" },
   { status: "watched", id: "watched", title: "Просмотрено", action: "Хочу пересмотреть", target: "planned" },
 ];
 const catalogStatus = document.querySelector("#catalog-status");
 let searchFilms = [];
+
+function normalizeFilm(film) {
+  if (!film || !Number.isSafeInteger(film.id) || film.id <= 0
+    || !["planned", "watched"].includes(film.status)) throw new Error("Invalid film");
+  const text = (value) => {
+    if (value == null) return null;
+    if (typeof value !== "string") throw new Error("Invalid text");
+    return value.trim() || null;
+  };
+  const year = film.year ?? null;
+  const rating = film.rating ?? null;
+  if (year !== null && !Number.isInteger(year)) throw new Error("Invalid year");
+  if (rating !== null && (typeof rating !== "number" || !Number.isFinite(rating) || rating < 0 || rating > 10)) throw new Error("Invalid rating");
+  let poster = text(film.poster);
+  if (poster !== null) {
+    const url = new URL(poster);
+    if (url.protocol !== "https:" || url.username || url.password) throw new Error("Invalid poster");
+    poster = url.href;
+  }
+  return { id: film.id, nameRu: text(film.nameRu), nameOriginal: text(film.nameOriginal), year, rating, poster, status: film.status };
+}
+
+function restoreCatalog() {
+  let raw;
+  try {
+    raw = localStorage.getItem(storageKey);
+  } catch {
+    catalogLocked = true;
+    storageStatus.textContent = "Не удалось прочитать каталог. Проверьте доступ к хранилищу и перезагрузите страницу";
+    return;
+  }
+  if (raw === null) return;
+  try {
+    const data = JSON.parse(raw);
+    if (!data || data.version !== 1 || !Array.isArray(data.films)) throw new Error("Invalid catalog");
+    const restored = new Map();
+    let duplicates = false;
+    for (const value of data.films) {
+      const film = normalizeFilm(value);
+      if (restored.has(film.id)) duplicates = true;
+      else restored.set(film.id, film);
+    }
+    catalog = restored;
+    if (duplicates) storageStatus.textContent = "Повторяющиеся фильмы объединены";
+  } catch {
+    catalogLocked = true;
+    storageStatus.textContent = "Не удалось восстановить каталог. Сохранённые данные оставлены без изменений";
+  }
+}
+
+function saveCatalog(next) {
+  if (catalogLocked) return false;
+  try {
+    localStorage.setItem(storageKey, JSON.stringify({ version: 1, films: Array.from(next.values()).map(normalizeFilm) }));
+  } catch {
+    catalogStatus.textContent = "";
+    storageStatus.textContent = "Не удалось сохранить изменения. Проверьте доступ к хранилищу браузера и попробуйте снова";
+    return false;
+  }
+  catalog = next;
+  storageStatus.textContent = "";
+  return true;
+}
 
 function renderCatalog(focusId) {
   let focusTarget;
@@ -26,6 +92,7 @@ function renderCatalog(focusId) {
       move.type = "button";
       move.className = "film-action";
       move.textContent = list.action;
+      move.disabled = catalogLocked;
       move.addEventListener("click", () => moveFilm(film.id, list.target));
       card.append(move);
       if (film.id === focusId) focusTarget = move;
@@ -54,6 +121,7 @@ function renderSearch(focusId) {
         add.type = "button";
         add.className = "film-action";
         add.textContent = list.title;
+        add.disabled = catalogLocked;
         add.addEventListener("click", () => addToCatalog(film, list.status));
         card.append(add);
       }
@@ -64,22 +132,28 @@ function renderSearch(focusId) {
 }
 
 function addToCatalog(film, target) {
+  if (catalogLocked) return;
   if (!Number.isSafeInteger(film.id) || film.id <= 0 || catalog.has(film.id)) return;
   const list = catalogLists.find((item) => item.status === target);
   if (!list) return;
-  catalog.set(film.id, { ...film, status: target });
+  const next = new Map(catalog);
+  next.set(film.id, { ...film, status: target });
+  if (!saveCatalog(next)) return;
   renderCatalog();
   renderSearch(film.id);
   catalogStatus.textContent = `Фильм добавлен в „${list.title}“`;
 }
 
 function moveFilm(id, target) {
+  if (catalogLocked) return;
   const film = catalog.get(id);
   const list = catalogLists.find((item) => item.status === target);
   if (!film || !list || film.status === target) return;
   // Повторная вставка ставит перенесённую запись в начало нового списка.
-  catalog.delete(id);
-  catalog.set(id, { ...film, status: target });
+  const next = new Map(catalog);
+  next.delete(id);
+  next.set(id, { ...film, status: target });
+  if (!saveCatalog(next)) return;
   renderSearch();
   renderCatalog(id);
   catalogStatus.textContent = `Фильм перенесён в „${list.title}“`;
@@ -112,6 +186,9 @@ function createCard(film) {
   card.append(poster, heading, meta);
   return card;
 }
+
+restoreCatalog();
+renderCatalog();
 
 input.addEventListener("input", () => {
   error.textContent = "";

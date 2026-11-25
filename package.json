@@ -2,9 +2,10 @@
   "name": "kinova",
   "version": "0.1.0",
   "private": true,
-  "engines": { "node": ">=22" },
+  "engines": { "node": "22.x" },
   "scripts": {
     "start": "node --env-file=.env.local server.cjs",
-    "test": "node tests/search.cjs"
+    "test": "node tests/search.cjs",
+    "build": "node build.cjs"
   }
 }

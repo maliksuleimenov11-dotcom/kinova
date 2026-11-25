@@ -346,7 +346,17 @@ form.addEventListener("submit", async (event) => {
     const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`, {
       signal: AbortSignal.timeout(12000),
     });
-    const data = await response.json();
+    // Vercel Firewall может вернуть 429 с HTML или обычным текстом вместо JSON.
+    let data;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      if (response.status !== 429) throw parseError;
+    }
+    if (response.status === 429 && data?.error !== "API_LIMIT") {
+      status.textContent = "Слишком много запросов к поиску. Подождите немного и попробуйте снова";
+      return;
+    }
     if (!response.ok) {
       const messages = {
         API_LIMIT: "Лимит API исчерпан. Попробуйте позже",

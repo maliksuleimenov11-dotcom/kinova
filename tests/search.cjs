@@ -124,6 +124,18 @@ async function run() {
     assert(message().startsWith("Не удалось выполнить поиск"));
     ready();
   }
+  for (const json of [async () => { throw new SyntaxError("HTML firewall response"); }, async () => ({ error: "RATE_LIMITED" })]) {
+    reply = async () => ({ status: 429, ok: false, json });
+    const before = requests;
+    await submit();
+    assert.equal(message(), "Слишком много запросов к поиску. Подождите немного и попробуйте снова");
+    assert.equal(requests, before + 1);
+    ready();
+  }
+  reply = async () => ({ status: 429, ok: false, json: async () => ({ error: "API_LIMIT" }) });
+  await submit();
+  assert.equal(message(), "Лимит API исчерпан. Попробуйте позже");
+  ready();
   reply = async () => ({ ok: true, json: async () => { throw new SyntaxError("JSON"); } });
   await submit();
   ready();

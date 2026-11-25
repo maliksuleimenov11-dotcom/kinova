@@ -40,6 +40,9 @@ footer { display: flex; justify-content: space-between; gap: 12px; border-top: 1
 .catalog-section h3 { font-size: 18px; }
 #watchlist-count, #watched-count { color: #aeb9a7; margin-left: 8px; }
 .film-action { width: 100%; margin-top: 16px; white-space: normal; }
+.rating-form { margin-top: 16px; border: 1px solid #4b554a; padding: 12px; border-radius: 10px; }
+.rating-form select { width: 100%; min-height: 44px; padding: 8px; font: inherit; color: inherit; background: #202622; border: 1px solid #4b554a; border-radius: 6px; }
+.rating-form button { width: 100%; margin-top: 10px; min-width: 44px; }
 .film-status { color: #c4e69b; line-height: 1.6; overflow-wrap: anywhere; }
 #catalog-status { color: #c4e69b; line-height: 1.6; }
 #catalog-status:empty { display: none; }

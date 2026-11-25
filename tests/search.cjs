@@ -244,7 +244,7 @@ async function run() {
   const invalidRows = [null, { ...validFilm, id: "11" }, { ...validFilm, status: "other" },
     { ...validFilm, nameRu: 123 }, { ...validFilm, year: 2000.5 }, { ...validFilm, rating: 11 },
     { ...validFilm, poster: "javascript:alert(1)" }, { ...validFilm, poster: "https://user:password@example.org/a.jpg" }];
-  const invalidRaw = ["{broken", "null", "[]", JSON.stringify({ version: 2, films: [] }),
+  const invalidRaw = ["{broken", "null", "[]", JSON.stringify({ version: 3, films: [] }),
     JSON.stringify({ version: 1, films: {} }), ...invalidRows.map((film) => JSON.stringify({ version: 1, films: [validFilm, film] }))];
   for (const raw of invalidRaw) {
     const page = storagePage(raw);
@@ -322,6 +322,59 @@ async function run() {
   assert.deepEqual(openedAgain.nodes.watched.children.map((card) => card.dataset.filmId), [90, 91]);
   assert.equal(openedAgain.nodes["watched-count"].textContent, "2");
   assert.equal(openedAgain.nodes["watchlist-empty"].hidden, false);
+
+  const oldRaw = JSON.stringify({ version: 1, films: [validFilm] });
+  const ratedPage = storagePage(oldRaw);
+  assert.equal(ratedPage.values.get("kinova.catalog"), oldRaw);
+  const ratingCard = () => ratedPage.nodes.watchlist.children[0];
+  const openRating = () => { ratingCard().children[5].listeners.click(); return ratingCard().children[6]; };
+  let ratingForm = openRating();
+  assert.equal(ratingCard().children[3].disabled, true);
+  assert.equal(ratingForm.children[2].focused, true);
+  ratingForm.children[2].value = "8";
+  ratedPage.failWrite(true);
+  ratingForm.listeners.submit({ preventDefault() {} });
+  assert.equal(ratingCard().children[6], ratingForm);
+  assert.equal(ratingForm.children[2].value, "8");
+  assert.equal(ratedPage.values.get("kinova.catalog"), oldRaw);
+  assert.equal(ratingCard().children[4].textContent, "Моя оценка: не указана");
+  ratedPage.failWrite(false);
+  ratingForm.listeners.submit({ preventDefault() {} });
+  assert.equal(ratingCard().children[4].textContent, "Моя оценка: 8 из 10");
+  assert.equal(ratingCard().children[5].focused, true);
+  let savedRating = JSON.parse(ratedPage.values.get("kinova.catalog"));
+  assert.equal(savedRating.version, 2);
+  assert.equal(savedRating.films[0].rating, 8);
+  assert.equal(savedRating.films[0].personalRating, 8);
+  assert.equal(savedRating.films[0].review, "");
+  ratingForm = openRating();
+  ratingForm.children[2].value = "1";
+  ratingForm.children[5].listeners.click();
+  assert.equal(ratingCard().children[4].textContent, "Моя оценка: 8 из 10");
+  ratingForm = openRating();
+  for (const invalid of ["0", "11", "2.5", "abc"]) {
+    ratingForm.children[2].value = invalid;
+    ratingForm.listeners.submit({ preventDefault() {} });
+    assert(ratingForm.children[3].textContent.startsWith("Выберите целую оценку"));
+    assert.equal(JSON.parse(ratedPage.values.get("kinova.catalog")).films[0].personalRating, 8);
+  }
+  for (const value of ["1", "10", ""]) {
+    ratingForm.children[2].value = value;
+    ratingForm.listeners.submit({ preventDefault() {} });
+    assert.equal(JSON.parse(ratedPage.values.get("kinova.catalog")).films[0].personalRating, value ? Number(value) : null);
+    ratingForm = openRating();
+  }
+  ratingForm.children[2].value = "8";
+  ratingForm.listeners.submit({ preventDefault() {} });
+  ratingCard().children[3].listeners.click();
+  const reloadedRating = storagePage(ratedPage.values.get("kinova.catalog"));
+  assert.equal(reloadedRating.nodes.watched.children[0].children[4].textContent, "Моя оценка: 8 из 10");
+  const futureReview = storagePage(JSON.stringify({ version: 2, films: [{ ...validFilm, personalRating: 9, review: "Сохранённый отзыв" }] }));
+  futureReview.nodes.watchlist.children[0].children[5].listeners.click();
+  const futureForm = futureReview.nodes.watchlist.children[0].children[6];
+  futureForm.children[2].value = "7";
+  futureForm.listeners.submit({ preventDefault() {} });
+  assert.equal(JSON.parse(futureReview.values.get("kinova.catalog")).films[0].review, "Сохранённый отзыв");
 
   let timer;
   let timeoutMs;

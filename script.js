@@ -18,6 +18,7 @@ const catalogLists = [
 ];
 const catalogStatus = document.querySelector("#catalog-status");
 let searchFilms = [];
+let ratingEditor = null;
 
 function normalizeFilm(film) {
   if (!film || !Number.isSafeInteger(film.id) || film.id <= 0
@@ -29,6 +30,10 @@ function normalizeFilm(film) {
   };
   const year = film.year ?? null;
   const rating = film.rating ?? null;
+  const personalRating = film.personalRating ?? null;
+  const review = film.review ?? "";
+  if (personalRating !== null && (!Number.isInteger(personalRating) || personalRating < 1 || personalRating > 10)) throw new Error("Invalid personal rating");
+  if (typeof review !== "string" || Array.from(review.trim()).length > 500) throw new Error("Invalid review");
   if (year !== null && !Number.isInteger(year)) throw new Error("Invalid year");
   if (rating !== null && (typeof rating !== "number" || !Number.isFinite(rating) || rating < 0 || rating > 10)) throw new Error("Invalid rating");
   let poster = text(film.poster);
@@ -37,7 +42,7 @@ function normalizeFilm(film) {
     if (url.protocol !== "https:" || url.username || url.password) throw new Error("Invalid poster");
     poster = url.href;
   }
-  return { id: film.id, nameRu: text(film.nameRu), nameOriginal: text(film.nameOriginal), year, rating, poster, status: film.status };
+  return { id: film.id, nameRu: text(film.nameRu), nameOriginal: text(film.nameOriginal), year, rating, poster, status: film.status, personalRating, review: review.trim() };
 }
 
 function restoreCatalog() {
@@ -52,11 +57,11 @@ function restoreCatalog() {
   if (raw === null) return;
   try {
     const data = JSON.parse(raw);
-    if (!data || data.version !== 1 || !Array.isArray(data.films)) throw new Error("Invalid catalog");
+    if (!data || ![1, 2].includes(data.version) || !Array.isArray(data.films)) throw new Error("Invalid catalog");
     const restored = new Map();
     let duplicates = false;
     for (const value of data.films) {
-      const film = normalizeFilm(value);
+      const film = normalizeFilm(data.version === 1 && value ? { ...value, personalRating: null, review: "" } : value);
       if (restored.has(film.id)) duplicates = true;
       else restored.set(film.id, film);
     }
@@ -71,7 +76,7 @@ function restoreCatalog() {
 function saveCatalog(next) {
   if (catalogLocked) return false;
   try {
-    localStorage.setItem(storageKey, JSON.stringify({ version: 1, films: Array.from(next.values()).map(normalizeFilm) }));
+    localStorage.setItem(storageKey, JSON.stringify({ version: 2, films: Array.from(next.values()).map(normalizeFilm) }));
   } catch {
     catalogStatus.textContent = "";
     storageStatus.textContent = "Не удалось сохранить изменения. Проверьте доступ к хранилищу браузера и попробуйте снова";
@@ -83,6 +88,7 @@ function saveCatalog(next) {
 }
 
 function renderCatalog(focusId) {
+  const editorFocus = ratingEditor?.form.contains?.(document.activeElement) ? document.activeElement : null;
   let focusTarget;
   for (const list of catalogLists) {
     const films = Array.from(catalog.values()).filter((film) => film.status === list.status).reverse();
@@ -92,9 +98,20 @@ function renderCatalog(focusId) {
       move.type = "button";
       move.className = "film-action";
       move.textContent = list.action;
-      move.disabled = catalogLocked;
+      move.disabled = catalogLocked || ratingEditor?.id === film.id;
       move.addEventListener("click", () => moveFilm(film.id, list.target));
       card.append(move);
+      const personal = document.createElement("p");
+      personal.className = "film-status";
+      personal.textContent = film.personalRating == null ? "Моя оценка: не указана" : `Моя оценка: ${film.personalRating} из 10`;
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "film-action";
+      edit.textContent = "Моя оценка";
+      edit.disabled = catalogLocked;
+      edit.addEventListener("click", () => openRatingEditor(film.id));
+      card.append(personal, edit);
+      if (ratingEditor?.id === film.id) card.append(ratingEditor.form);
       if (film.id === focusId) focusTarget = move;
       return card;
     }));
@@ -102,6 +119,72 @@ function renderCatalog(focusId) {
     document.querySelector(`#${list.id}-empty`).hidden = films.length > 0;
   }
   focusTarget?.focus();
+  if (!focusTarget) editorFocus?.focus();
+}
+
+function closeRatingEditor(id) {
+  ratingEditor = null;
+  renderCatalog();
+  const list = catalogLists.find((item) => item.status === catalog.get(id)?.status);
+  if (!list) return;
+  const cards = document.querySelector(`#${list.id}`).children;
+  Array.from(cards).find((card) => String(card.dataset.filmId) === String(id))?.children[5]?.focus();
+}
+
+function openRatingEditor(id) {
+  if (catalogLocked || !catalog.has(id)) return;
+  const film = catalog.get(id);
+  const editorForm = document.createElement("form");
+  editorForm.className = "rating-form";
+  editorForm.noValidate = true;
+  const note = document.createElement("p");
+  note.className = "demo-note";
+  note.textContent = "Открытие формы другого фильма отменит несохранённый ввод.";
+  const label = document.createElement("label");
+  label.htmlFor = `personal-rating-${id}`;
+  label.textContent = "Моя оценка";
+  const select = document.createElement("select");
+  select.id = label.htmlFor;
+  for (let number = 0; number <= 10; number++) {
+    const option = document.createElement("option");
+    option.value = number ? String(number) : "";
+    option.textContent = number ? String(number) : "Не указана";
+    select.append(option);
+  }
+  select.value = film.personalRating == null ? "" : String(film.personalRating);
+  const validation = document.createElement("p");
+  validation.id = `rating-error-${id}`;
+  validation.className = "error";
+  validation.setAttribute("role", "alert");
+  select.setAttribute("aria-describedby", validation.id);
+  const save = document.createElement("button");
+  save.type = "submit";
+  save.textContent = "Сохранить";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "Отмена";
+  cancel.addEventListener("click", () => closeRatingEditor(id));
+  editorForm.append(note, label, select, validation, save, cancel);
+  editorForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (catalogLocked || ratingEditor?.form !== editorForm) return;
+    if (!/^(?:[1-9]|10)?$/.test(select.value)) {
+      validation.textContent = "Выберите целую оценку от 1 до 10 или „Не указана“";
+      select.setAttribute("aria-invalid", "true");
+      select.focus();
+      return;
+    }
+    validation.textContent = "";
+    select.removeAttribute("aria-invalid");
+    const next = new Map(catalog);
+    next.set(id, { ...catalog.get(id), personalRating: select.value === "" ? null : Number(select.value) });
+    if (!saveCatalog(next)) return;
+    closeRatingEditor(id);
+    catalogStatus.textContent = "Оценка сохранена";
+  });
+  ratingEditor = { id, form: editorForm };
+  renderCatalog();
+  select.focus();
 }
 
 function renderSearch(focusId) {
@@ -145,7 +228,7 @@ function addToCatalog(film, target) {
 }
 
 function moveFilm(id, target) {
-  if (catalogLocked) return;
+  if (catalogLocked || ratingEditor?.id === id) return;
   const film = catalog.get(id);
   const list = catalogLists.find((item) => item.status === target);
   if (!film || !list || film.status === target) return;

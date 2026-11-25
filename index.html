@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Кинова — личный каталог фильмов</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <header class="header"><a class="brand" href="index.html">кинóва<span>Личный каталог фильмов</span></a><span class="badge">Учебный проект</span></header>
+  <main>
+    <section class="intro" aria-labelledby="page-title">
+      <p class="eyebrow">Хороший вечер начинается с фильма</p>
+      <h1 id="page-title">Что посмотрим?</h1>
+      <p class="description">Найдите фильм для следующего вечера.<br>Скоро здесь можно будет собирать свою коллекцию.</p>
+      <form id="search-form" novalidate>
+        <label for="query">Название фильма</label>
+        <div class="search-row"><input id="query" name="query" type="search" placeholder="Например, Матрица" aria-describedby="demo-note input-error"><button type="submit">Найти <span aria-hidden="true">↗</span></button></div>
+        <p id="input-error" class="error" role="alert"></p>
+      </form>
+      <p id="demo-note" class="demo-note"><span aria-hidden="true">○</span> Тестовый режим · API ещё не подключён. Попробуйте «Матрица» или «Дюна».</p>
+    </section>
+    <section class="results-section" aria-labelledby="results-title">
+      <div class="results-heading"><h2 id="results-title">Результаты поиска</h2><span id="result-count"></span></div>
+      <p id="search-status" class="status" role="status" aria-live="polite">Здесь появятся фильмы. Введите название и нажмите «Найти».</p>
+      <div id="results" class="film-grid" aria-busy="false"></div>
+    </section>
+  </main>
+  <footer>Кинова <span>Место для ваших будущих кинооткрытий</span></footer>
+</body>
+</html>

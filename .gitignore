@@ -1,0 +1,18 @@
+# Локальные переменные и секреты
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Зависимости, сборка, локальные файлы хостинга
+node_modules/
+dist/
+.next/
+.vercel/
+coverage/
+*.log
+
+# Файлы операционной системы
+.DS_Store
+Thumbs.db

@@ -4,6 +4,7 @@
   "private": true,
   "engines": { "node": ">=22" },
   "scripts": {
-    "start": "node --env-file=.env.local server.cjs"
+    "start": "node --env-file=.env.local server.cjs",
+    "test": "node tests/search.cjs"
   }
 }

@@ -438,6 +438,56 @@ async function run() {
   assert.equal(clearedPersonal.personalRating, null);
   assert.equal(clearedPersonal.review, "");
 
+  // Редактирование не меняет порядок, статус, счётчики и другие фильмы.
+  const finalRaw = JSON.stringify({ version: 2, films: [
+    { ...validFilm, personalRating: 6, review: "Сохранено" },
+    { ...validFilm, id: 12, status: "watched", personalRating: 9, review: "Другой фильм" },
+  ] });
+  const finalPage = storagePage(finalRaw);
+  finalPage.nodes.watchlist.children[0].children[5].listeners.click();
+  const finalForm = finalPage.nodes.watchlist.children[0].children[6];
+  finalForm.children[5].value = "Черновик";
+  // Повторное нажатие той же кнопки не стирает черновик.
+  finalPage.nodes.watchlist.children[0].children[5].listeners.click();
+  assert.equal(finalPage.nodes.watchlist.children[0].children[6], finalForm);
+  assert.equal(finalForm.children[5].value, "Черновик");
+  finalPage.respond(async () => { throw new Error("network"); });
+  finalPage.nodes.query.value = "фильм";
+  await finalPage.nodes["search-form"].listeners.submit({ preventDefault() {} });
+  assert.equal(finalPage.nodes.watchlist.children[0].children[6], finalForm);
+  assert.equal(finalPage.values.get("kinova.catalog"), finalRaw);
+  // Прямой вызов переноса также защищает редактируемый фильм.
+  vm.runInContext('moveFilm(11, "watched")', finalPage.context);
+  assert.equal(finalPage.values.get("kinova.catalog"), finalRaw);
+  // Перенос другого фильма сохраняет открытый черновик.
+  finalPage.nodes.watched.children[0].children[3].listeners.click();
+  const editingCard = () => finalPage.nodes.watchlist.children.find((card) => card.dataset.filmId === 11);
+  assert.equal(editingCard().children[6], finalForm);
+  assert.equal(finalForm.children[5].value, "Черновик");
+  const beforeEditRows = JSON.parse(finalPage.values.get("kinova.catalog")).films;
+  finalForm.children[2].value = "10";
+  finalForm.listeners.submit({ preventDefault() {} });
+  const afterEditRows = JSON.parse(finalPage.values.get("kinova.catalog")).films;
+  assert.deepEqual(afterEditRows.map((film) => [film.id, film.status]), beforeEditRows.map((film) => [film.id, film.status]));
+  assert.deepEqual(afterEditRows.find((film) => film.id === 12), beforeEditRows.find((film) => film.id === 12));
+  assert.equal(finalPage.nodes["watchlist-count"].textContent, "2");
+  assert.equal(afterEditRows.find((film) => film.id === 11).review, "Черновик");
+  // Открытие другой формы отменяет только несохранённый ввод предыдущей.
+  editingCard().children[5].listeners.click();
+  editingCard().children[6].children[5].value = "Не сохранять";
+  finalPage.nodes.watchlist.children.find((card) => card.dataset.filmId === 12).children[5].listeners.click();
+  editingCard().children[5].listeners.click();
+  assert.equal(editingCard().children[6].children[5].value, "Черновик");
+  assert.equal(finalPage.nodes.watchlist.children.filter((card) => card.children[6]?.className === "rating-form").length, 1);
+
+  for (const broken of [{ personalRating: 0 }, { personalRating: 1.5 }, { personalRating: "8" }, { review: 123 }, { review: "я".repeat(501) }]) {
+    const raw = JSON.stringify({ version: 2, films: [{ ...validFilm, personalRating: null, review: "", ...broken }] });
+    const page = storagePage(raw);
+    assert(page.nodes["storage-status"].textContent.startsWith("Не удалось восстановить каталог"));
+    assert.equal(page.values.get("kinova.catalog"), raw);
+    assert.equal(page.writes(), 0);
+  }
+
   let timer;
   let timeoutMs;
   let cleared = 0;

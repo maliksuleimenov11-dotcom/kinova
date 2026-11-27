@@ -1002,6 +1002,43 @@ async function run() {
   assert.equal(externalStatusDeletion.nodes.results.children[0].children[3].textContent, "В списке „Хочу посмотреть“");
   assert.equal(externalStatusDeletion.networkCalls(), callsBeforeDeleting);
 
+  // Полный цикл для последнего фильма каждого списка: удаление, экспорт, отмена, повторное открытие.
+  for (const state of ["planned", "watched"]) {
+    const row = { ...validFilm, id: 301, nameRu: "Последний фильм", status: state, personalRating: 9, review: "Сохранить полностью" };
+    const page = storagePage(JSON.stringify({ version: 2, films: [row] }));
+    const list = state === "planned" ? "watchlist" : "watched";
+    deleteButton(page, list, 301).listeners.click();
+    assert.equal(page.nodes.watchlist.children.length + page.nodes.watched.children.length, 0);
+    assert.equal(page.nodes[`${list}-count`].textContent, "0");
+    assert.equal(page.nodes[`${list}-empty`].hidden, false);
+    page.context.Blob = Blob;
+    page.context.URL = mockURL;
+    page.context.setTimeout = (callback) => cleanup.push(callback);
+    page.context.document.body = exportPage.context.document.body;
+    page.context.document.createElement = exportPage.context.document.createElement;
+    page.nodes["catalog-export"].listeners.click();
+    cleanup.shift()();
+    assert.equal(JSON.parse(await blobs[blobs.length - 1].text()).films.length, 0);
+    assertUndoAvailable(page);
+    page.nodes["catalog-undo"].listeners.click();
+    const restoredRaw = page.values.get("kinova.catalog");
+    assert.deepEqual(JSON.parse(restoredRaw).films, [row]);
+    const reopened = storagePage(restoredRaw);
+    assert.equal(reopened.nodes[list].children.length, 1);
+    assert.equal(reopened.nodes[list].children[0].children[4].textContent, "Моя оценка: 9 из 10");
+    assert.equal(reopened.nodes[list].children[0].children[6].textContent, "Мой отзыв: Сохранить полностью");
+    assert.equal(reopened.nodes["catalog-undo-panel"].hidden, true);
+    assert.equal(page.networkCalls(), 0);
+  }
+  const failedSecondDelete = compatibilityPage();
+  deleteForCompatibility(failedSecondDelete, 201);
+  failedSecondDelete.failWrite(true);
+  deleteForCompatibility(failedSecondDelete, 202);
+  assertUndoAvailable(failedSecondDelete);
+  failedSecondDelete.failWrite(false);
+  failedSecondDelete.nodes["catalog-undo"].listeners.click();
+  assert.deepEqual(idsIn(failedSecondDelete, "watchlist"), [203, 202, 201]);
+
   let timer;
   let timeoutMs;
   let cleared = 0;

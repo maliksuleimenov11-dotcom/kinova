@@ -33,6 +33,21 @@
       <button id="catalog-export" type="button" aria-describedby="catalog-export-hint">Скачать каталог</button>
       <p id="catalog-export-hint" class="demo-note">Файл содержит ваши фильмы, оценки и отзывы. Храните его у себя.</p>
       <p id="catalog-export-status" class="status" role="status" aria-live="polite"></p>
+      <div class="catalog-import">
+        <button id="catalog-import-choose" type="button" aria-describedby="catalog-import-hint">Выбрать файл каталога</button>
+        <input id="catalog-import-file" type="file" accept=".json,application/json" hidden>
+        <p id="catalog-import-hint" class="demo-note">JSON до 5 МиБ. Сначала покажем результат проверки; каталог не изменится.</p>
+        <p id="catalog-import-status" class="status" role="status" aria-live="polite"></p>
+        <section id="catalog-import-preview" class="import-preview" aria-labelledby="catalog-import-title" hidden>
+          <h3 id="catalog-import-title" tabindex="-1">Предварительная проверка файла</h3>
+          <p id="catalog-import-name"></p>
+          <p id="catalog-import-summary"></p>
+          <p>Ваши существующие фильмы останутся без изменений.</p>
+          <p class="demo-note">Добавление из файла появится на следующем шаге. Сейчас можно проверить файл и отменить выбор.</p>
+          <button type="button" disabled>Добавить из файла</button>
+          <button id="catalog-import-cancel" type="button">Отмена импорта</button>
+        </section>
+      </div>
       <form id="catalog-search-form" class="catalog-search" novalidate>
         <label for="catalog-query">Название в моём каталоге</label>
         <div class="catalog-search-row">

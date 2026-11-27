@@ -39,6 +39,9 @@ footer { display: flex; justify-content: space-between; gap: 12px; border-top: 1
 .catalog-section { border-top: 1px solid #343a35; padding-block: 28px 64px; }
 .catalog-section h3 { font-size: 18px; }
 .catalog-search { margin-top: 24px; }
+.catalog-import { margin-top: 20px; }
+.import-preview { border: 1px solid #4b554a; border-radius: 10px; padding: 16px; margin-top: 16px; overflow-wrap: anywhere; }
+.import-preview button { margin: 8px 8px 0 0; max-width: 100%; white-space: normal; }
 .catalog-search-row { display: flex; flex-wrap: wrap; gap: 10px; }
 .catalog-search-row input { flex: 1 1 240px; }
 .catalog-search-row button { flex: 1 1 auto; }

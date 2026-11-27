@@ -20,7 +20,7 @@ function element() {
 }
 
 async function run() {
-  const nodes = Object.fromEntries(["search-form", "query", "input-error", "search-status", "results", "result-count", "watchlist", "watchlist-count", "watchlist-empty", "watched", "watched-count", "watched-empty", "catalog-status", "storage-status", "catalog-search-form", "catalog-query", "catalog-search-error", "catalog-search-status", "catalog-search-reset", "catalog-export", "catalog-export-status"].map((id) => [id, element()]));
+  const nodes = Object.fromEntries(["search-form", "query", "input-error", "search-status", "results", "result-count", "watchlist", "watchlist-count", "watchlist-empty", "watched", "watched-count", "watched-empty", "catalog-status", "storage-status", "catalog-search-form", "catalog-query", "catalog-search-error", "catalog-search-status", "catalog-search-reset", "catalog-export", "catalog-export-status", "catalog-import-choose", "catalog-import-file", "catalog-import-hint", "catalog-import-status", "catalog-import-preview", "catalog-import-title", "catalog-import-name", "catalog-import-summary", "catalog-import-cancel"].map((id) => [id, element()]));
   const stored = new Map([["unrelated", "keep"]]);
   let writeFails = false;
   const storage = {
@@ -637,6 +637,82 @@ async function run() {
   assert.equal(lockedExport.nodes["catalog-export"].disabled, true);
   lockedExport.nodes["catalog-export"].listeners.click();
   assert.equal(lockedExport.values.get("kinova.catalog"), "{broken");
+
+  const previewRaw = JSON.stringify({ version: 2, films: [validFilm] });
+  const importPage = storagePage(previewRaw);
+  let reads = 0;
+  const chooseFile = async (content, options = {}) => {
+    importPage.nodes["catalog-import-file"].files = [{
+      name: options.name || "catalog.json", size: options.size ?? 100,
+      text: async () => { reads++; if (options.error) throw new Error("read failed"); return content; },
+    }];
+    await importPage.nodes["catalog-import-file"].listeners.change();
+  };
+  const importData = JSON.stringify({ version: 2, films: [
+    { ...validFilm, personalRating: 3, review: "Из файла" },
+    { ...validFilm, id: 22, status: "watched", personalRating: 9, review: "Новый" },
+    { ...validFilm, id: 22, status: "planned", personalRating: 1 },
+  ] });
+  await chooseFile(importData, { name: "<b>Каталог</b>.json" });
+  assert.equal(importPage.nodes["catalog-import-preview"].hidden, false);
+  assert.equal(importPage.nodes["catalog-import-name"].textContent, "Файл: <b>Каталог</b>.json");
+  assert.equal(importPage.nodes["catalog-import-name"].children.length, 0);
+  assert.equal(importPage.nodes["catalog-import-summary"].textContent, "Уникальных фильмов: 2. Добавится: 1. Уже есть: 1. Повторов в файле пропущено: 1.");
+  assert.equal(importPage.nodes["catalog-import-title"].focused, true);
+  assert.equal(importPage.nodes["catalog-import-file"].value, "");
+  assert.equal(importPage.nodes.watchlist.children[0].children[3].disabled, true);
+  assert.equal(importPage.nodes.watchlist.children[0].children[5].disabled, true);
+  vm.runInContext('addToCatalog({ id: 99 }, "planned"); moveFilm(11, "watched"); openRatingEditor(11);', importPage.context);
+  assert.equal(importPage.nodes.watchlist.children.length, 1);
+  assert.equal(importPage.nodes.watched.children.length, 0);
+  assert.equal(importPage.values.get("kinova.catalog"), previewRaw);
+  assert.equal(importPage.writes(), 0);
+  importPage.nodes["catalog-import-cancel"].listeners.click();
+  assert.equal(importPage.nodes["catalog-import-preview"].hidden, true);
+  assert.equal(importPage.nodes["catalog-import-choose"].focused, true);
+  assert.equal(importPage.nodes.watchlist.children[0].children[3].disabled, false);
+  await chooseFile(importData);
+  assert.equal(reads, 2); // Повторный выбор того же файла.
+  importPage.nodes["catalog-import-cancel"].listeners.click();
+  const beforeBigFile = reads;
+  await chooseFile("not read", { size: 5242881 });
+  assert.equal(reads, beforeBigFile);
+  assert(importPage.nodes["catalog-import-status"].textContent.startsWith("Файл больше 5 МиБ"));
+  for (const bad of ["{broken", JSON.stringify({ version: 3, films: [] }), JSON.stringify({ version: 2, films: [validFilm, { ...validFilm, review: "я".repeat(501) }] })]) {
+    await chooseFile(bad);
+    assert.equal(importPage.nodes["catalog-import-preview"].hidden, true);
+    assert(importPage.nodes["catalog-import-status"].textContent.startsWith("Не удалось импортировать каталог"));
+    assert.equal(importPage.values.get("kinova.catalog"), previewRaw);
+  }
+  await chooseFile("", { error: true });
+  assert.equal(importPage.nodes["catalog-import-status"].textContent, "Не удалось прочитать файл. Выберите его ещё раз");
+  await chooseFile('\uFEFF' + JSON.stringify({ version: 1, films: [validFilm] }), { size: 5242880 });
+  assert.equal(importPage.nodes["catalog-import-status"].textContent, "Новых фильмов нет");
+  assert.equal(vm.runInContext('pendingImport.films.get(11).personalRating', importPage.context), null);
+  importPage.nodes["catalog-import-cancel"].listeners.click();
+  await chooseFile(JSON.stringify({ version: 2, films: [] }));
+  assert.equal(importPage.nodes["catalog-import-status"].textContent, "Новых фильмов нет");
+  importPage.nodes["catalog-import-cancel"].listeners.click();
+  importPage.nodes.watchlist.children[0].children[5].listeners.click();
+  assert.equal(importPage.nodes["catalog-import-choose"].disabled, true);
+  const beforeEditorRead = reads;
+  await chooseFile(importData);
+  assert.equal(reads, beforeEditorRead);
+  assert.equal(importPage.nodes.watchlist.children[0].children[6].className, "rating-form");
+  assert.equal(importPage.networkCalls(), 0);
+  assert.equal(importPage.writes(), 0);
+  assert.equal(importPage.values.get("unrelated"), "keep");
+
+  const cancelReadingPage = storagePage(null);
+  let finishReading;
+  cancelReadingPage.nodes["catalog-import-file"].files = [{ name: "slow.json", size: 100, text: () => new Promise((resolve) => { finishReading = resolve; }) }];
+  const reading = cancelReadingPage.nodes["catalog-import-file"].listeners.change();
+  assert.equal(cancelReadingPage.nodes["catalog-import-choose"].disabled, true);
+  cancelReadingPage.nodes["catalog-import-cancel"].listeners.click();
+  finishReading(importData);
+  await reading;
+  assert.equal(cancelReadingPage.nodes["catalog-import-preview"].hidden, true);
+  assert.equal(cancelReadingPage.writes(), 0);
 
   let timer;
   let timeoutMs;

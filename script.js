@@ -14,6 +14,13 @@ let catalogLocked = false;
 const storageStatus = document.querySelector("#storage-status");
 const exportButton = document.querySelector("#catalog-export");
 const exportStatus = document.querySelector("#catalog-export-status");
+const importChoose = document.querySelector("#catalog-import-choose");
+const importFile = document.querySelector("#catalog-import-file");
+const importStatus = document.querySelector("#catalog-import-status");
+const importPreview = document.querySelector("#catalog-import-preview");
+let pendingImport = null;
+let importReading = false;
+let importSequence = 0;
 const catalogLists = [
   { status: "planned", id: "watchlist", title: "Хочу посмотреть", action: "Уже посмотрел", target: "watched" },
   { status: "watched", id: "watched", title: "Просмотрено", action: "Хочу пересмотреть", target: "planned" },
@@ -26,6 +33,92 @@ const catalogQueryInput = document.querySelector("#catalog-query");
 const catalogSearchError = document.querySelector("#catalog-search-error");
 const catalogSearchStatus = document.querySelector("#catalog-search-status");
 let catalogQuery = "";
+
+function catalogChangesBlocked() {
+  return catalogLocked || importReading || pendingImport !== null;
+}
+
+function updateImportControls() {
+  importChoose.disabled = catalogLocked || ratingEditor !== null || importReading;
+  document.querySelector("#catalog-import-hint").textContent = ratingEditor
+    ? "Сначала сохраните или отмените редактирование фильма"
+    : "JSON до 5 МиБ. Сначала покажем результат проверки; каталог не изменится.";
+}
+
+function refreshImportState() {
+  updateImportControls();
+  renderCatalog();
+  renderSearch();
+}
+
+importChoose.addEventListener("click", () => {
+  if (!importChoose.disabled) importFile.click();
+});
+
+document.querySelector("#catalog-import-cancel").addEventListener("click", () => {
+  importSequence++;
+  pendingImport = null;
+  importReading = false;
+  importFile.value = "";
+  importPreview.hidden = true;
+  importStatus.textContent = "Импорт отменён. Каталог не изменён.";
+  refreshImportState();
+  importChoose.focus();
+});
+
+importFile.addEventListener("change", async () => {
+  const file = importFile.files?.[0];
+  importFile.value = ""; // Повторный выбор того же файла должен вызвать change.
+  if (!file || catalogLocked || ratingEditor || importReading) return;
+  const sequence = ++importSequence;
+  pendingImport = null;
+  importPreview.hidden = true;
+  if (file.size > 5 * 1024 * 1024) {
+    importStatus.textContent = "Файл больше 5 МиБ. Выберите файл меньшего размера";
+    refreshImportState();
+    return;
+  }
+  importReading = true;
+  importStatus.textContent = "Проверяем файл…";
+  refreshImportState();
+  let raw;
+  let rawSnapshot;
+  try {
+    rawSnapshot = localStorage.getItem(storageKey);
+    raw = await file.text();
+  } catch {
+    if (sequence !== importSequence) return;
+    importReading = false;
+    importStatus.textContent = "Не удалось прочитать файл. Выберите его ещё раз";
+    refreshImportState();
+    return;
+  }
+  if (sequence !== importSequence) return;
+  try {
+    const data = JSON.parse(raw.replace(/^\uFEFF/, ""));
+    if (!data || ![1, 2].includes(data.version) || !Array.isArray(data.films)) throw new Error("Invalid import");
+    const films = new Map();
+    let duplicates = 0;
+    for (const value of data.films) {
+      const film = normalizeFilm(data.version === 1 && value ? { ...value, personalRating: null, review: "" } : value);
+      if (films.has(film.id)) duplicates++;
+      else films.set(film.id, film);
+    }
+    const existing = Array.from(films.keys()).filter((id) => catalog.has(id)).length;
+    pendingImport = { films, existing, duplicates, rawSnapshot };
+    document.querySelector("#catalog-import-name").textContent = `Файл: ${file.name}`;
+    document.querySelector("#catalog-import-summary").textContent = `Уникальных фильмов: ${films.size}. Добавится: ${films.size - existing}. Уже есть: ${existing}. Повторов в файле пропущено: ${duplicates}.`;
+    importStatus.textContent = films.size === existing ? "Новых фильмов нет" : "Файл проверен. Каталог пока не изменён.";
+    importPreview.hidden = false;
+  } catch {
+    pendingImport = null;
+    importStatus.textContent = "Не удалось импортировать каталог: файл повреждён или имеет неподдерживаемый формат. Ваш каталог не изменён";
+  } finally {
+    importReading = false;
+    refreshImportState();
+  }
+  if (pendingImport) document.querySelector("#catalog-import-title").focus();
+});
 
 function applyCatalogSearch() {
   const query = catalogQuery.toLocaleLowerCase("ru");
@@ -126,7 +219,7 @@ function restoreCatalog() {
 }
 
 function saveCatalog(next) {
-  if (catalogLocked) return false;
+  if (catalogChangesBlocked()) return false;
   try {
     localStorage.setItem(storageKey, JSON.stringify({ version: 2, films: Array.from(next.values()).map(normalizeFilm) }));
   } catch {
@@ -179,7 +272,7 @@ function renderCatalog(focusId) {
       move.type = "button";
       move.className = "film-action";
       move.textContent = list.action;
-      move.disabled = catalogLocked || ratingEditor?.id === film.id;
+      move.disabled = catalogChangesBlocked() || ratingEditor?.id === film.id;
       move.addEventListener("click", () => moveFilm(film.id, list.target));
       card.append(move);
       const personal = document.createElement("p");
@@ -189,7 +282,7 @@ function renderCatalog(focusId) {
       edit.type = "button";
       edit.className = "film-action";
       edit.textContent = "Оценка и отзыв";
-      edit.disabled = catalogLocked;
+      edit.disabled = catalogChangesBlocked();
       edit.addEventListener("click", () => openRatingEditor(film.id));
       card.append(personal, edit);
       if (ratingEditor?.id === film.id) card.append(ratingEditor.form);
@@ -206,6 +299,7 @@ function renderCatalog(focusId) {
     document.querySelector(`#${list.id}-empty`).hidden = films.length > 0;
   }
   applyCatalogSearch();
+  updateImportControls();
   focusTarget?.focus();
   if (!focusTarget) editorFocus?.focus();
 }
@@ -220,7 +314,7 @@ function closeRatingEditor(id) {
 }
 
 function openRatingEditor(id) {
-  if (catalogLocked || !catalog.has(id)) return;
+  if (catalogChangesBlocked() || !catalog.has(id)) return;
   if (ratingEditor?.id === id) {
     ratingEditor.select.focus();
     return;
@@ -327,7 +421,7 @@ function renderSearch(focusId) {
         add.type = "button";
         add.className = "film-action";
         add.textContent = list.title;
-        add.disabled = catalogLocked;
+        add.disabled = catalogChangesBlocked();
         add.addEventListener("click", () => addToCatalog(film, list.status));
         card.append(add);
       }
@@ -338,7 +432,7 @@ function renderSearch(focusId) {
 }
 
 function addToCatalog(film, target) {
-  if (catalogLocked) return;
+  if (catalogChangesBlocked()) return;
   if (!Number.isSafeInteger(film.id) || film.id <= 0 || catalog.has(film.id)) return;
   const list = catalogLists.find((item) => item.status === target);
   if (!list) return;
@@ -351,7 +445,7 @@ function addToCatalog(film, target) {
 }
 
 function moveFilm(id, target) {
-  if (catalogLocked || ratingEditor?.id === id) return;
+  if (catalogChangesBlocked() || ratingEditor?.id === id) return;
   const film = catalog.get(id);
   const list = catalogLists.find((item) => item.status === target);
   if (!film || !list || film.status === target) return;

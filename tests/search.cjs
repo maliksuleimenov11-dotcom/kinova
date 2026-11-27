@@ -885,6 +885,123 @@ async function run() {
   assert.equal(beforeDeleteConflict.writes(), 0);
   assert.equal(beforeDeleteConflict.values.get("kinova.catalog"), conflictingRaw);
 
+  const compatibilityPage = () => storagePage(JSON.stringify({ version: 2, films: deletionRows }));
+  const deleteForCompatibility = (page, id = 202) => deleteButton(page, "watchlist", id).listeners.click();
+  const assertUndoAvailable = (page) => {
+    assert.equal(page.nodes["catalog-undo-panel"].hidden, false);
+    assert.equal(page.nodes["catalog-undo"].disabled, false);
+  };
+  const searchAfterDelete = compatibilityPage();
+  deleteForCompatibility(searchAfterDelete);
+  searchAfterDelete.nodes["catalog-query"].value = "Средний";
+  searchAfterDelete.nodes["catalog-search-form"].listeners.submit({ preventDefault() {} });
+  assert.equal(searchAfterDelete.nodes["watchlist-count"].textContent, "Найдено: 0 из 2");
+  assertUndoAvailable(searchAfterDelete);
+  searchAfterDelete.nodes["catalog-search-reset"].listeners.click();
+  assertUndoAvailable(searchAfterDelete);
+  searchAfterDelete.nodes["catalog-query"].value = "Средний";
+  searchAfterDelete.nodes["catalog-search-form"].listeners.submit({ preventDefault() {} });
+  searchAfterDelete.nodes.query.value = "фильм";
+  await searchAfterDelete.nodes["search-form"].listeners.submit({ preventDefault() {} });
+  assertUndoAvailable(searchAfterDelete);
+  searchAfterDelete.nodes["catalog-undo"].listeners.click();
+  assert.equal(searchAfterDelete.nodes["watchlist-count"].textContent, "Найдено: 1 из 3");
+  assert.equal(searchAfterDelete.nodes["catalog-query"].value, "Средний");
+
+  const draftDuringDeletion = compatibilityPage();
+  const editedCard = () => draftDuringDeletion.nodes.watchlist.children.find((card) => card.dataset.filmId === 201);
+  editedCard().children[5].listeners.click();
+  const untouchedDraft = editedCard().children[6];
+  untouchedDraft.children[5].value = "Не терять черновик";
+  assert.equal(deleteButton(draftDuringDeletion, "watchlist", 201).disabled, true);
+  vm.runInContext('deleteFilm(201)', draftDuringDeletion.context);
+  assert.equal(draftDuringDeletion.writes(), 0);
+  deleteForCompatibility(draftDuringDeletion);
+  assert.equal(editedCard().children[6], untouchedDraft);
+  assert.equal(untouchedDraft.children[5].value, "Не терять черновик");
+  draftDuringDeletion.nodes["catalog-undo"].listeners.click();
+  assert.equal(editedCard().children[6], untouchedDraft);
+  assert.equal(untouchedDraft.children[5].value, "Не терять черновик");
+
+  const editAfterDeletion = compatibilityPage();
+  deleteForCompatibility(editAfterDeletion);
+  editAfterDeletion.nodes.watchlist.children[0].children[5].listeners.click();
+  let editWithUndo = editAfterDeletion.nodes.watchlist.children[0].children[6];
+  editWithUndo.children[9].listeners.click();
+  assertUndoAvailable(editAfterDeletion);
+  editAfterDeletion.nodes.watchlist.children[0].children[5].listeners.click();
+  editWithUndo = editAfterDeletion.nodes.watchlist.children[0].children[6];
+  editWithUndo.children[2].value = "10";
+  editAfterDeletion.failWrite(true);
+  editWithUndo.listeners.submit({ preventDefault() {} });
+  assertUndoAvailable(editAfterDeletion);
+  editAfterDeletion.failWrite(false);
+  editWithUndo.listeners.submit({ preventDefault() {} });
+  assert.equal(editAfterDeletion.nodes["catalog-undo-panel"].hidden, true);
+
+  for (const action of ['addToCatalog({ id: 999, nameRu: "Новый" }, "planned")', 'moveFilm(201, "watched")', 'addToCatalog({ id: 202, nameRu: "Добавлен заново" }, "planned")']) {
+    const page = compatibilityPage();
+    deleteForCompatibility(page);
+    vm.runInContext(action, page.context);
+    assert.equal(page.nodes["catalog-undo-panel"].hidden, true);
+    const newRaw = page.values.get("kinova.catalog");
+    page.nodes["catalog-undo"].listeners.click();
+    assert.equal(page.values.get("kinova.catalog"), newRaw);
+    const readded = JSON.parse(newRaw).films.find((film) => film.id === 202);
+    if (readded) { assert.equal(readded.personalRating, null); assert.equal(readded.review, ""); }
+  }
+  const twoDeletions = compatibilityPage();
+  deleteForCompatibility(twoDeletions, 201);
+  deleteForCompatibility(twoDeletions, 202);
+  twoDeletions.nodes["catalog-undo"].listeners.click();
+  assert.deepEqual(idsIn(twoDeletions, "watchlist"), [203, 202]);
+
+  const importWithUndo = compatibilityPage();
+  deleteForCompatibility(importWithUndo);
+  await loadImport(importWithUndo, importData);
+  assert.equal(importWithUndo.nodes["catalog-undo"].disabled, true);
+  const previewBeforeUndoClick = importWithUndo.values.get("kinova.catalog");
+  assert.equal(deleteButton(importWithUndo, "watchlist", 201).disabled, true);
+  vm.runInContext('deleteFilm(201)', importWithUndo.context);
+  assert.equal(importWithUndo.values.get("kinova.catalog"), previewBeforeUndoClick);
+  importWithUndo.nodes["catalog-undo"].listeners.click();
+  assert.equal(importWithUndo.values.get("kinova.catalog"), previewBeforeUndoClick);
+  importWithUndo.nodes["catalog-import-cancel"].listeners.click();
+  assertUndoAvailable(importWithUndo);
+  await loadImport(importWithUndo, importData);
+  importWithUndo.failWrite(true);
+  importWithUndo.nodes["catalog-import-confirm"].listeners.click();
+  importWithUndo.nodes["catalog-import-cancel"].listeners.click();
+  assertUndoAvailable(importWithUndo);
+  importWithUndo.failWrite(false);
+  await loadImport(importWithUndo, importData);
+  importWithUndo.nodes["catalog-import-confirm"].listeners.click();
+  assert.equal(importWithUndo.nodes["catalog-undo-panel"].hidden, true);
+
+  const exportWithUndo = compatibilityPage();
+  deleteForCompatibility(exportWithUndo);
+  exportWithUndo.context.Blob = Blob;
+  exportWithUndo.context.URL = mockURL;
+  exportWithUndo.context.setTimeout = (callback) => cleanup.push(callback);
+  exportWithUndo.context.document.body = exportPage.context.document.body;
+  exportWithUndo.context.document.createElement = exportPage.context.document.createElement;
+  exportWithUndo.nodes["catalog-export"].listeners.click();
+  cleanup.shift()();
+  assertUndoAvailable(exportWithUndo);
+  assert(!JSON.parse(await blobs[blobs.length - 1].text()).films.some((film) => film.id === 202));
+  assert.equal(exportWithUndo.networkCalls(), 0);
+
+  const externalStatusDeletion = compatibilityPage();
+  externalStatusDeletion.respond(async () => ({ ok: true, json: async () => ({ films: [{ id: 202, nameRu: "Средний фильм" }] }) }));
+  externalStatusDeletion.nodes.query.value = "Средний";
+  await externalStatusDeletion.nodes["search-form"].listeners.submit({ preventDefault() {} });
+  const callsBeforeDeleting = externalStatusDeletion.networkCalls();
+  deleteForCompatibility(externalStatusDeletion);
+  assert.equal(externalStatusDeletion.nodes.results.children[0].children[3].textContent, "Хочу посмотреть");
+  externalStatusDeletion.nodes["catalog-undo"].listeners.click();
+  assert.equal(externalStatusDeletion.nodes.results.children[0].children[3].textContent, "В списке „Хочу посмотреть“");
+  assert.equal(externalStatusDeletion.networkCalls(), callsBeforeDeleting);
+
   let timer;
   let timeoutMs;
   let cleared = 0;

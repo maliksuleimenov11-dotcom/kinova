@@ -784,6 +784,34 @@ async function run() {
   assert.equal(changedTab.nodes.watchlist.children[0].children[3].disabled, true);
   assert.equal(changedTab.nodes["catalog-export"].disabled, true);
 
+  // Полный перенос именно сформированного экспорта в независимый каталог.
+  const transfer = storagePage(null);
+  const exportedJson = await blobs[0].text();
+  transfer.respond(async () => ({ ok: true, json: async () => ({ films: [{ id: 11 }, { id: 12 }] }) }));
+  transfer.nodes.query.value = "фильм";
+  await transfer.nodes["search-form"].listeners.submit({ preventDefault() {} });
+  const callsBeforeTransfer = transfer.networkCalls();
+  await loadImport(transfer, exportedJson);
+  assert.equal(transfer.writes(), 0);
+  transfer.nodes["catalog-import-confirm"].listeners.click();
+  const transferredRaw = transfer.values.get("kinova.catalog");
+  assert.deepEqual(JSON.parse(transferredRaw), downloaded);
+  assert.equal(transfer.writes(), 1);
+  assert.equal(transfer.networkCalls(), callsBeforeTransfer);
+  assert.equal(transfer.nodes.results.children[0].children[3].textContent, "В списке „Хочу посмотреть“");
+  assert.equal(transfer.nodes.results.children[1].children[3].textContent, "В списке „Просмотрено“");
+  const reopenedTransfer = storagePage(transferredRaw);
+  assert.equal(reopenedTransfer.nodes.watchlist.children[0].children[4].textContent, "Моя оценка: 8 из 10");
+  assert.equal(reopenedTransfer.nodes.watchlist.children[0].children[6].textContent, "Мой отзыв: Сохранённый отзыв");
+  assert.equal(reopenedTransfer.nodes.watched.children[0].children[4].textContent, "Моя оценка: 10 из 10");
+  assert.equal(reopenedTransfer.nodes.watched.children[0].children[6].textContent, "Мой отзыв: Вторая запись");
+  await loadImport(reopenedTransfer, exportedJson);
+  assert.equal(reopenedTransfer.nodes["catalog-import-confirm"].disabled, true);
+  reopenedTransfer.nodes["catalog-import-confirm"].listeners.click();
+  assert.equal(reopenedTransfer.writes(), 0);
+  assert.equal(reopenedTransfer.values.get("kinova.catalog"), transferredRaw);
+  assert.equal(reopenedTransfer.values.get("unrelated"), "keep");
+
   let timer;
   let timeoutMs;
   let cleared = 0;

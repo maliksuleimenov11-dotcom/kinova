@@ -38,6 +38,10 @@ h2 { margin: 0; font-size: 19px; font-weight: 550; }
 footer { display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid #343a35; padding-block: 24px; color: #9ba59b; font-size: 12px; }
 .catalog-section { border-top: 1px solid #343a35; padding-block: 28px 64px; }
 .catalog-section h3 { font-size: 18px; }
+.catalog-search { margin-top: 24px; }
+.catalog-search-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.catalog-search-row input { flex: 1 1 240px; }
+.catalog-search-row button { flex: 1 1 auto; }
 #watchlist-count, #watched-count { color: #aeb9a7; margin-left: 8px; }
 .film-action { width: 100%; margin-top: 16px; white-space: normal; }
 .rating-form { margin-top: 16px; border: 1px solid #4b554a; padding: 12px; border-radius: 10px; }

@@ -19,6 +19,56 @@ const catalogLists = [
 const catalogStatus = document.querySelector("#catalog-status");
 let searchFilms = [];
 let ratingEditor = null;
+const catalogSearchForm = document.querySelector("#catalog-search-form");
+const catalogQueryInput = document.querySelector("#catalog-query");
+const catalogSearchError = document.querySelector("#catalog-search-error");
+const catalogSearchStatus = document.querySelector("#catalog-search-status");
+let catalogQuery = "";
+
+function applyCatalogSearch() {
+  const query = catalogQuery.toLocaleLowerCase("ru");
+  for (const list of catalogLists) {
+    const cards = document.querySelector(`#${list.id}`).children;
+    let visible = 0;
+    for (const card of cards) {
+      const film = catalog.get(Number(card.dataset.filmId));
+      const title = film.nameRu || film.nameOriginal || "Без названия";
+      card.hidden = !title.toLocaleLowerCase("ru").includes(query);
+      if (!card.hidden) visible++;
+    }
+    document.querySelector(`#${list.id}-count`).textContent = query ? `Найдено: ${visible} из ${cards.length}` : String(cards.length);
+    const empty = document.querySelector(`#${list.id}-empty`);
+    empty.hidden = visible > 0;
+    empty.textContent = cards.length > 0
+      ? "В этом списке ничего не найдено. Измените запрос или нажмите „Показать все“"
+      : "Пока нет фильмов. Добавьте фильм из поиска";
+  }
+}
+
+function setCatalogQuery(value) {
+  const query = value.trim();
+  if (query.length > 200) {
+    catalogSearchError.textContent = "Название должно быть не длиннее 200 символов";
+    catalogQueryInput.setAttribute("aria-invalid", "true");
+    catalogQueryInput.focus();
+    return;
+  }
+  catalogSearchError.textContent = "";
+  catalogQueryInput.removeAttribute("aria-invalid");
+  catalogQuery = query;
+  applyCatalogSearch();
+  catalogSearchStatus.textContent = query ? `Поиск в каталоге: «${query}»` : "Показаны все сохранённые фильмы";
+}
+
+catalogSearchForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  setCatalogQuery(catalogQueryInput.value);
+});
+document.querySelector("#catalog-search-reset").addEventListener("click", () => {
+  catalogQueryInput.value = "";
+  setCatalogQuery("");
+  catalogQueryInput.focus();
+});
 
 function normalizeFilm(film) {
   if (!film || !Number.isSafeInteger(film.id) || film.id <= 0
@@ -124,6 +174,7 @@ function renderCatalog(focusId) {
     document.querySelector(`#${list.id}-count`).textContent = String(films.length);
     document.querySelector(`#${list.id}-empty`).hidden = films.length > 0;
   }
+  applyCatalogSearch();
   focusTarget?.focus();
   if (!focusTarget) editorFocus?.focus();
 }

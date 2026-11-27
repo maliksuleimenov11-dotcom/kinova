@@ -20,7 +20,7 @@ function element() {
 }
 
 async function run() {
-  const nodes = Object.fromEntries(["search-form", "query", "input-error", "search-status", "results", "result-count", "watchlist", "watchlist-count", "watchlist-empty", "watched", "watched-count", "watched-empty", "catalog-status", "storage-status"].map((id) => [id, element()]));
+  const nodes = Object.fromEntries(["search-form", "query", "input-error", "search-status", "results", "result-count", "watchlist", "watchlist-count", "watchlist-empty", "watched", "watched-count", "watched-empty", "catalog-status", "storage-status", "catalog-search-form", "catalog-query", "catalog-search-error", "catalog-search-status", "catalog-search-reset"].map((id) => [id, element()]));
   const stored = new Map([["unrelated", "keep"]]);
   let writeFails = false;
   const storage = {
@@ -239,6 +239,7 @@ async function run() {
     if (raw !== null) values.set("kinova.catalog", raw);
     let writes = 0;
     let failWrite = false;
+    let networkCalls = 0;
     let response = async () => ({ ok: true, json: async () => ({ films: [{ id: 90, nameRu: "Проверка" }] }) });
     const context = vm.createContext({
       URL, location: { protocol: "http:" }, AbortSignal,
@@ -247,10 +248,10 @@ async function run() {
         setItem(key, value) { writes++; if (failWrite) throw new Error("quota"); values.set(key, value); },
       },
       document: { querySelector: (selector) => pageNodes[selector.slice(1)], createElement: element },
-      fetch: () => response(),
+      fetch: () => { networkCalls++; return response(); },
     });
     vm.runInContext(read("script.js"), context);
-    return { nodes: pageNodes, values, context, button: searchButton, writes: () => writes, failWrite: (value) => { failWrite = value; }, respond: (value) => { response = value; } };
+    return { nodes: pageNodes, values, context, button: searchButton, writes: () => writes, failWrite: (value) => { failWrite = value; }, respond: (value) => { response = value; }, networkCalls: () => networkCalls };
   }
   const validFilm = { id: 11, status: "planned", nameRu: "Первый фильм", nameOriginal: null, year: 2000, rating: 8, poster: null };
   const invalidRows = [null, { ...validFilm, id: "11" }, { ...validFilm, status: "other" },
@@ -499,6 +500,63 @@ async function run() {
     assert.equal(page.values.get("kinova.catalog"), raw);
     assert.equal(page.writes(), 0);
   }
+
+  const localPage = storagePage(JSON.stringify({ version: 2, films: [
+    { ...validFilm, id: 101, nameRu: "Матрица" },
+    { ...validFilm, id: 102, nameRu: "Дюна" },
+    { ...validFilm, id: 103, nameRu: null, nameOriginal: "Матрица", status: "watched" },
+  ] }));
+  const localNodes = localPage.nodes;
+  const localRaw = localPage.values.get("kinova.catalog");
+  // Любой запрос к сети — ошибка проверки, поиск каталога должен работать без неё.
+  localPage.respond(async () => { throw new Error("Unexpected network request"); });
+  const localSubmit = () => localNodes["catalog-search-form"].listeners.submit({ preventDefault() {} });
+  const visibleIds = (id) => localNodes[id].children.filter((card) => !card.hidden).map((card) => card.dataset.filmId);
+  localNodes["catalog-query"].value = " МАТР ";
+  assert.equal(visibleIds("watchlist").length, 2);
+  localSubmit();
+  assert.deepEqual(visibleIds("watchlist"), [101]);
+  assert.deepEqual(visibleIds("watched"), [103]);
+  assert.equal(localNodes["watchlist-count"].textContent, "Найдено: 1 из 2");
+  assert.equal(localNodes["watched-count"].textContent, "Найдено: 1 из 1");
+  localNodes["catalog-query"].value = "Дюна";
+  assert.deepEqual(visibleIds("watchlist"), [101]);
+  localNodes["catalog-query"].value = "я".repeat(201);
+  localSubmit();
+  assert.deepEqual(visibleIds("watchlist"), [101]);
+  assert(localNodes["catalog-search-error"].textContent);
+  localNodes["catalog-query"].value = "нет совпадений";
+  localSubmit();
+  assert.equal(visibleIds("watchlist").length, 0);
+  assert.equal(localNodes["watchlist-empty"].hidden, false);
+  assert(localNodes["watchlist-empty"].textContent.startsWith("В этом списке ничего не найдено"));
+  assert.equal(localPage.values.get("kinova.catalog"), localRaw);
+  assert.equal(localPage.writes(), 0);
+  localNodes["catalog-search-reset"].listeners.click();
+  assert.equal(localNodes["catalog-query"].value, "");
+  assert.equal(localNodes["catalog-query"].focused, true);
+  assert.deepEqual(visibleIds("watchlist"), [102, 101]);
+  localNodes.watchlist.children[1].children[5].listeners.click();
+  const localDraft = localNodes.watchlist.children[1].children[6];
+  localDraft.children[5].value = "Черновик";
+  localNodes["catalog-query"].value = "Дюна";
+  localSubmit();
+  assert.equal(localNodes.watchlist.children[1].hidden, true);
+  localNodes["catalog-search-reset"].listeners.click();
+  assert.equal(localNodes.watchlist.children[1].children[6], localDraft);
+  assert.equal(localDraft.children[5].value, "Черновик");
+  localDraft.children[9].listeners.click();
+  localNodes["catalog-query"].value = "матр";
+  localSubmit();
+  localNodes.watchlist.children[1].children[3].listeners.click();
+  assert.equal(visibleIds("watchlist").length, 0);
+  assert.deepEqual(visibleIds("watched"), [101, 103]);
+  assert.equal(localNodes["watchlist-count"].textContent, "Найдено: 0 из 1");
+  localNodes["catalog-query"].value = "  ";
+  localSubmit();
+  assert.deepEqual(visibleIds("watchlist"), [102]);
+  assert.equal(localNodes["watchlist-count"].textContent, "1");
+  assert.equal(localPage.networkCalls(), 0);
 
   let timer;
   let timeoutMs;

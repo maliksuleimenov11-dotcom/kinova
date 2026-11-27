@@ -30,6 +30,17 @@
       <h2 id="catalog-title">Мой каталог</h2>
       <p class="demo-note">Каталог сохраняется в этом браузере. Очистка данных сайта удалит фильмы</p>
       <p id="storage-status" class="error" role="alert"></p>
+      <form id="catalog-search-form" class="catalog-search" novalidate>
+        <label for="catalog-query">Название в моём каталоге</label>
+        <div class="catalog-search-row">
+          <input id="catalog-query" name="catalog-query" type="search" maxlength="200" placeholder="Часть названия фильма" aria-describedby="catalog-search-hint catalog-search-error">
+          <button type="submit">Найти в каталоге</button>
+          <button id="catalog-search-reset" type="button">Показать все</button>
+        </div>
+        <p id="catalog-search-hint" class="demo-note">Только сохранённые фильмы. Лимит API не расходуется.</p>
+        <p id="catalog-search-error" class="error" role="alert"></p>
+      </form>
+      <p id="catalog-search-status" class="status" role="status" aria-live="polite"></p>
       <p id="catalog-status" role="status" aria-live="polite"></p>
       <h3>Хочу посмотреть <span id="watchlist-count">0</span></h3>
       <p id="watchlist-empty" class="status">Пока нет фильмов. Добавьте фильм из поиска</p>

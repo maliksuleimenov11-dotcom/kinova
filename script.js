@@ -40,6 +40,124 @@ const catalogSearchError = document.querySelector("#catalog-search-error");
 const catalogSearchStatus = document.querySelector("#catalog-search-status");
 let catalogQuery = "";
 
+// Первый шаг подборок: только локальные демонстрационные данные.
+const discoverForm = document.querySelector("#discover-form");
+const discoverKind = document.querySelector("#discover-kind");
+const discoverMonth = document.querySelector("#discover-month");
+const discoverSubmit = document.querySelector("#discover-submit");
+const discoverResults = document.querySelector("#discover-results");
+const discoverStatus = document.querySelector("#discover-status");
+const discoverResultsTitle = document.querySelector("#discover-results-title");
+let discoveryLoading = false;
+let discoveryMonthSignature = "";
+
+function getDiscoveryMonths(now = new Date()) {
+  const shifted = new Date(now.getTime() + 5 * 60 * 60 * 1000);
+  const year = shifted.getUTCFullYear();
+  const month = shifted.getUTCMonth();
+  const names = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
+  return [0, 1].map((offset) => {
+    const index = month - offset;
+    const actualYear = index < 0 ? year - 1 : year;
+    const actualMonth = (index + 12) % 12;
+    return { value: `${actualYear}-${String(actualMonth + 1).padStart(2, "0")}`, label: `${names[actualMonth]} ${actualYear}` };
+  });
+}
+
+function refreshDiscoveryMonths() {
+  const months = getDiscoveryMonths();
+  const signature = months.map((month) => month.value).join(",");
+  const previous = discoverMonth.value;
+  const expired = Boolean(discoveryMonthSignature && previous && !months.some((month) => month.value === previous));
+  if (signature !== discoveryMonthSignature) {
+    discoverMonth.replaceChildren(...months.map((month) => {
+      const option = document.createElement("option");
+      option.value = month.value;
+      option.textContent = month.label;
+      return option;
+    }));
+    discoverMonth.value = months.some((month) => month.value === previous) ? previous : months[0].value;
+    discoveryMonthSignature = signature;
+  }
+  return expired;
+}
+
+function updateDiscoveryFields() {
+  refreshDiscoveryMonths();
+  const showMonth = discoverKind.value === "premieres";
+  document.querySelector("#discover-month-field").hidden = !showMonth;
+  discoverMonth.disabled = !showMonth;
+}
+
+function demoDiscoveryPoster() {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="600"><rect width="400" height="600" fill="#294b3a"/><circle cx="290" cy="210" r="120" fill="#547758"/><text x="28" y="480" fill="#f3f0e9" font-family="sans-serif" font-size="22">ТЕСТОВЫЙ ПОСТЕР</text></svg>';
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+async function getDemoDiscovery(kind, month) {
+  if (kind === "popular") return [
+    { id: 900000001, nameRu: "Город вечерних огней", year: 2025, rating: 8.1, poster: demoDiscoveryPoster() },
+    { id: 900000002, nameRu: "Письма из будущего", year: null, rating: null, poster: null },
+  ];
+  return [
+    { id: 900000003, nameRu: "Путешествие к рассвету", year: Number(month.slice(0, 4)), rating: null, poster: demoDiscoveryPoster(), premiereRu: `${month}-12` },
+    { id: 900000004, nameRu: null, nameOriginal: "The Quiet Harbour", year: Number(month.slice(0, 4)), rating: null, poster: null, premiereRu: null },
+  ];
+}
+
+discoverKind.addEventListener("change", updateDiscoveryFields);
+discoverMonth.addEventListener("change", () => { refreshDiscoveryMonths(); });
+updateDiscoveryFields();
+
+discoverForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (discoveryLoading) return;
+  const kind = discoverKind.value;
+  if (!["popular", "premieres"].includes(kind)) {
+    discoverStatus.textContent = "Выберите доступную подборку";
+    return;
+  }
+  const expired = refreshDiscoveryMonths();
+  if (kind === "premieres" && expired) {
+    discoverStatus.textContent = "Список месяцев обновился. Выберите месяц и нажмите кнопку снова";
+    return;
+  }
+  const month = discoverMonth.value;
+  const selectedMonth = getDiscoveryMonths().find((item) => item.value === month);
+  if (kind === "premieres" && !selectedMonth) {
+    discoverStatus.textContent = "Выберите текущий или предыдущий месяц";
+    return;
+  }
+  const title = kind === "popular" ? "Популярные сейчас — тестовые данные" : `Премьеры в России: ${selectedMonth.label} — тестовые данные`;
+  discoveryLoading = true;
+  discoverSubmit.disabled = true;
+  discoverResults.setAttribute("aria-busy", "true");
+  discoverResults.replaceChildren();
+  discoverResultsTitle.textContent = title;
+  discoverStatus.textContent = "Загружаем подборку…";
+  try {
+    const films = await getDemoDiscovery(kind, month);
+    const shown = films.slice(0, 20);
+    discoverResults.replaceChildren(...shown.map((film) => {
+      const card = createCard(film);
+      if (kind === "premieres") {
+        const date = document.createElement("p");
+        date.className = "premiere-date";
+        date.textContent = film.premiereRu ? `Премьера в России: ${film.premiereRu.split("-").reverse().join(".")}` : "Дата премьеры не указана";
+        card.append(date);
+      }
+      return card;
+    }));
+    discoverStatus.textContent = shown.length ? `Показано ${shown.length} фильмов. Данные демонстрационные.` : "В этой подборке пока нет фильмов. Выберите другую подборку или месяц";
+  } catch {
+    discoverStatus.textContent = "Не удалось загрузить подборку. Проверьте соединение и попробуйте снова";
+  } finally {
+    discoveryLoading = false;
+    discoverSubmit.disabled = false;
+    discoverResults.setAttribute("aria-busy", "false");
+  }
+});
+
 function catalogChangesBlocked() {
   return catalogLocked || importReading || pendingImport !== null;
 }

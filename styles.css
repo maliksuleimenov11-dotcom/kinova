@@ -37,6 +37,13 @@ h2 { margin: 0; font-size: 19px; font-weight: 550; }
 .film-meta { display: flex; flex-wrap: wrap; gap: 8px 16px; color: #b5bcb5; font-size: 13px; line-height: 1.6; margin: 0; }
 footer { display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid #343a35; padding-block: 24px; color: #9ba59b; font-size: 12px; }
 .catalog-section { border-top: 1px solid #343a35; padding-block: 28px 64px; }
+.discover-section { border-top: 1px solid #343a35; padding-block: 28px 48px; }
+.discover-form { display: flex; flex-wrap: wrap; align-items: end; gap: 16px; margin-top: 24px; }
+.discover-form > div { flex: 1 1 220px; min-width: 0; }
+.discover-form select { display: block; width: 100%; min-height: 54px; padding: 12px; font: inherit; color: inherit; background: #202622; border: 1px solid #4b554a; border-radius: 10px; }
+.discover-form button { white-space: normal; max-width: 100%; }
+#discover-results-title { font-size: 18px; overflow-wrap: anywhere; margin-top: 28px; }
+.premiere-date { color: #b5bcb5; font-size: 13px; line-height: 1.6; }
 .catalog-section h3 { font-size: 18px; }
 .catalog-search { margin-top: 24px; }
 .catalog-import { margin-top: 20px; }

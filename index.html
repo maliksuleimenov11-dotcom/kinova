@@ -27,7 +27,7 @@
       <div id="results" class="film-grid" aria-busy="false"></div>
     </section>
     <section class="catalog-section" aria-labelledby="catalog-title">
-      <h2 id="catalog-title">Мой каталог</h2>
+      <h2 id="catalog-title" tabindex="-1">Мой каталог</h2>
       <p class="demo-note">Каталог сохраняется в этом браузере. Очистка данных сайта удалит фильмы</p>
       <p id="storage-status" class="error" role="alert"></p>
       <button id="catalog-export" type="button" aria-describedby="catalog-export-hint">Скачать каталог</button>
@@ -43,8 +43,8 @@
           <p id="catalog-import-name"></p>
           <p id="catalog-import-summary"></p>
           <p>Ваши существующие фильмы останутся без изменений.</p>
-          <p class="demo-note">Добавление из файла появится на следующем шаге. Сейчас можно проверить файл и отменить выбор.</p>
-          <button type="button" disabled>Добавить из файла</button>
+          <p class="demo-note">Добавление выполнится только после подтверждения. Существующие записи не заменяются.</p>
+          <button id="catalog-import-confirm" type="button" disabled>Добавить из файла</button>
           <button id="catalog-import-cancel" type="button">Отмена импорта</button>
         </section>
       </div>

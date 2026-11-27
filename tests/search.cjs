@@ -22,6 +22,8 @@ function element() {
 async function run() {
   const nodes = Object.fromEntries(["search-form", "query", "input-error", "search-status", "results", "result-count", "watchlist", "watchlist-count", "watchlist-empty", "watched", "watched-count", "watched-empty", "catalog-status", "storage-status", "catalog-search-form", "catalog-query", "catalog-search-error", "catalog-search-status", "catalog-search-reset", "catalog-export", "catalog-export-status", "catalog-import-choose", "catalog-import-file", "catalog-import-hint", "catalog-import-status", "catalog-import-preview", "catalog-import-title", "catalog-import-name", "catalog-import-summary", "catalog-import-cancel"].map((id) => [id, element()]));
   const stored = new Map([["unrelated", "keep"]]);
+  nodes["catalog-import-confirm"] = element();
+  nodes["catalog-title"] = element();
   let writeFails = false;
   const storage = {
     getItem(key) { return stored.get(key) ?? null; },
@@ -713,6 +715,74 @@ async function run() {
   await reading;
   assert.equal(cancelReadingPage.nodes["catalog-import-preview"].hidden, true);
   assert.equal(cancelReadingPage.writes(), 0);
+
+  const loadImport = async (page, content) => {
+    page.nodes["catalog-import-file"].files = [{ name: "copy.json", size: 500, text: async () => content }];
+    await page.nodes["catalog-import-file"].listeners.change();
+  };
+  const confirmPage = storagePage(JSON.stringify({ version: 2, films: [{ ...validFilm, personalRating: 8, review: "Текущий отзыв" }] }));
+  const confirmRaw = confirmPage.values.get("kinova.catalog");
+  confirmPage.nodes["catalog-query"].value = "скрыть всё";
+  confirmPage.nodes["catalog-search-form"].listeners.submit({ preventDefault() {} });
+  await loadImport(confirmPage, importData);
+  assert.equal(confirmPage.nodes["catalog-import-confirm"].disabled, false);
+  confirmPage.failWrite(true);
+  confirmPage.nodes["catalog-import-confirm"].listeners.click();
+  assert.equal(confirmPage.values.get("kinova.catalog"), confirmRaw);
+  assert.equal(confirmPage.nodes.watchlist.children.length, 1);
+  assert.equal(confirmPage.nodes["catalog-import-preview"].hidden, false);
+  assert.equal(confirmPage.nodes["catalog-import-confirm"].disabled, false);
+  const writesBeforeSuccess = confirmPage.writes();
+  confirmPage.failWrite(false);
+  confirmPage.nodes["catalog-import-confirm"].listeners.click();
+  assert.equal(confirmPage.writes(), writesBeforeSuccess + 1);
+  const merged = JSON.parse(confirmPage.values.get("kinova.catalog"));
+  assert.deepEqual(merged.films.map((film) => film.id), [11, 22]);
+  assert.equal(merged.films[0].personalRating, 8);
+  assert.equal(merged.films[0].review, "Текущий отзыв");
+  assert.equal(merged.films[0].status, "planned");
+  assert.equal(merged.films[1].personalRating, 9);
+  assert.equal(merged.films[1].review, "Новый");
+  assert.equal(merged.films[1].status, "watched");
+  assert.equal(confirmPage.nodes["catalog-query"].value, "");
+  assert.equal(confirmPage.nodes.watchlist.children[0].hidden, false);
+  assert.equal(confirmPage.nodes["catalog-import-preview"].hidden, true);
+  assert.equal(confirmPage.nodes["catalog-title"].focused, true);
+  assert.equal(confirmPage.nodes["catalog-import-status"].textContent, "Добавлено фильмов: 1. Уже были в каталоге: 1");
+  const successfulWrites = confirmPage.writes();
+  confirmPage.nodes["catalog-import-confirm"].listeners.click();
+  assert.equal(confirmPage.writes(), successfulWrites);
+  await loadImport(confirmPage, importData);
+  assert.equal(confirmPage.nodes["catalog-import-status"].textContent, "Новых фильмов нет");
+  assert.equal(confirmPage.nodes["catalog-import-confirm"].disabled, true);
+  confirmPage.nodes["catalog-import-confirm"].listeners.click();
+  assert.equal(confirmPage.writes(), successfulWrites);
+  assert.equal(confirmPage.networkCalls(), 0);
+  const mergedReloaded = storagePage(confirmPage.values.get("kinova.catalog"));
+  assert.equal(mergedReloaded.nodes["watchlist-count"].textContent, "1");
+  assert.equal(mergedReloaded.nodes["watched-count"].textContent, "1");
+  assert.equal(mergedReloaded.nodes.watched.children[0].children[4].textContent, "Моя оценка: 9 из 10");
+
+  const emptyTarget = storagePage(null);
+  await loadImport(emptyTarget, JSON.stringify({ version: 1, films: [validFilm, { ...validFilm, id: 33 }] }));
+  emptyTarget.nodes["catalog-import-confirm"].listeners.click();
+  const oldVersionImported = JSON.parse(emptyTarget.values.get("kinova.catalog"));
+  assert.equal(oldVersionImported.version, 2);
+  assert.deepEqual(emptyTarget.nodes.watchlist.children.map((card) => card.dataset.filmId), [33, 11]);
+  assert.equal(oldVersionImported.films[0].personalRating, null);
+  assert.equal(oldVersionImported.films[0].review, "");
+
+  const changedTab = storagePage(previewRaw);
+  await loadImport(changedTab, importData);
+  const otherTabRaw = JSON.stringify({ version: 2, films: [{ ...validFilm, review: "Из другой вкладки" }] });
+  changedTab.values.set("kinova.catalog", otherTabRaw);
+  changedTab.nodes["catalog-import-confirm"].listeners.click();
+  assert.equal(changedTab.values.get("kinova.catalog"), otherTabRaw);
+  assert.equal(changedTab.writes(), 0);
+  assert.equal(changedTab.nodes["catalog-import-preview"].hidden, true);
+  assert(changedTab.nodes["storage-status"].textContent.includes("Перезагрузите страницу"));
+  assert.equal(changedTab.nodes.watchlist.children[0].children[3].disabled, true);
+  assert.equal(changedTab.nodes["catalog-export"].disabled, true);
 
   let timer;
   let timeoutMs;

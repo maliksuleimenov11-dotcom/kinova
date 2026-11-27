@@ -18,6 +18,7 @@ const importChoose = document.querySelector("#catalog-import-choose");
 const importFile = document.querySelector("#catalog-import-file");
 const importStatus = document.querySelector("#catalog-import-status");
 const importPreview = document.querySelector("#catalog-import-preview");
+const importConfirm = document.querySelector("#catalog-import-confirm");
 let pendingImport = null;
 let importReading = false;
 let importSequence = 0;
@@ -40,6 +41,7 @@ function catalogChangesBlocked() {
 
 function updateImportControls() {
   importChoose.disabled = catalogLocked || ratingEditor !== null || importReading;
+  importConfirm.disabled = catalogLocked || importReading || !pendingImport || pendingImport.films.size === pendingImport.existing;
   document.querySelector("#catalog-import-hint").textContent = ratingEditor
     ? "Сначала сохраните или отмените редактирование фильма"
     : "JSON до 5 МиБ. Сначала покажем результат проверки; каталог не изменится.";
@@ -53,6 +55,56 @@ function refreshImportState() {
 
 importChoose.addEventListener("click", () => {
   if (!importChoose.disabled) importFile.click();
+});
+
+importConfirm.addEventListener("click", () => {
+  if (catalogLocked || importReading || !pendingImport || ratingEditor) return;
+  const preview = pendingImport;
+  if (preview.films.size === preview.existing) return;
+  let currentRaw;
+  try {
+    currentRaw = localStorage.getItem(storageKey);
+  } catch {
+    importStatus.textContent = "Не удалось проверить хранилище. Проверьте доступ и повторите импорт или отмените его.";
+    return;
+  }
+  if (currentRaw !== preview.rawSnapshot) {
+    // В памяти страницы старая версия: блокируем дальнейшую запись до перезагрузки.
+    catalogLocked = true;
+    exportButton.disabled = true;
+    pendingImport = null;
+    importPreview.hidden = true;
+    storageStatus.textContent = "Каталог изменился в другой вкладке. Перезагрузите страницу перед импортом. Данные не перезаписаны.";
+    importStatus.textContent = "Импорт не выполнен. Перезагрузите страницу.";
+    refreshImportState();
+    importStatus.tabIndex = -1;
+    importStatus.focus();
+    return;
+  }
+  const next = new Map(catalog);
+  let added = 0;
+  for (const [id, film] of preview.films) {
+    if (!next.has(id)) {
+      next.set(id, film);
+      added++;
+    }
+  }
+  // Запись синхронна: временно снимаем блокировку предварительного результата.
+  pendingImport = null;
+  if (!saveCatalog(next)) {
+    pendingImport = preview;
+    refreshImportState();
+    return;
+  }
+  importSequence++;
+  importFile.value = "";
+  importPreview.hidden = true;
+  catalogQueryInput.value = "";
+  setCatalogQuery("");
+  catalogStatus.textContent = "";
+  importStatus.textContent = `Добавлено фильмов: ${added}. Уже были в каталоге: ${preview.existing}`;
+  refreshImportState();
+  document.querySelector("#catalog-title").focus();
 });
 
 document.querySelector("#catalog-import-cancel").addEventListener("click", () => {

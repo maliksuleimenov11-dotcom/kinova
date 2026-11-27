@@ -4,6 +4,7 @@ const http = require("node:http");
 const { readFile } = require("node:fs/promises");
 const path = require("node:path");
 const search = require("./api/search.js");
+const discover = require("./api/search-discover.js");
 
 // Явный список: файлы окружения, .git и серверный код никогда не раздаются.
 const publicFiles = {
@@ -18,6 +19,7 @@ function createServer() {
     try {
       const pathname = new URL(req.url, "http://localhost").pathname;
       if (pathname === "/api/search") return await search(req, res);
+      if (pathname === "/api/search-discover" || pathname === "/api/search-discover.js") return await discover(req, res);
       const file = publicFiles[pathname];
       if (!file || !["GET", "HEAD"].includes(req.method)) {
         res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });

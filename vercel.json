@@ -6,6 +6,9 @@
   "functions": {
     "api/search.js": {
       "maxDuration": 15
+    },
+    "api/search-discover.js": {
+      "maxDuration": 15
     }
   }
 }

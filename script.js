@@ -40,7 +40,7 @@ const catalogSearchError = document.querySelector("#catalog-search-error");
 const catalogSearchStatus = document.querySelector("#catalog-search-status");
 let catalogQuery = "";
 
-// Первый шаг подборок: только локальные демонстрационные данные.
+// Подборки загружаются по кнопке через свою серверную функцию.
 const discoverForm = document.querySelector("#discover-form");
 const discoverKind = document.querySelector("#discover-kind");
 const discoverMonth = document.querySelector("#discover-month");
@@ -89,20 +89,25 @@ function updateDiscoveryFields() {
   discoverMonth.disabled = !showMonth;
 }
 
-function demoDiscoveryPoster() {
-  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="600"><rect width="400" height="600" fill="#294b3a"/><circle cx="290" cy="210" r="120" fill="#547758"/><text x="28" y="480" fill="#f3f0e9" font-family="sans-serif" font-size="22">ТЕСТОВЫЙ ПОСТЕР</text></svg>';
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-}
+const discoveryCache = new Map();
 
-async function getDemoDiscovery(kind, month) {
-  if (kind === "popular") return [
-    { id: 900000001, nameRu: "Город вечерних огней", year: 2025, rating: 8.1, poster: demoDiscoveryPoster() },
-    { id: 900000002, nameRu: "Письма из будущего", year: null, rating: null, poster: null },
-  ];
-  return [
-    { id: 900000003, nameRu: "Путешествие к рассвету", year: Number(month.slice(0, 4)), rating: null, poster: demoDiscoveryPoster(), premiereRu: `${month}-12` },
-    { id: 900000004, nameRu: null, nameOriginal: "The Quiet Harbour", year: Number(month.slice(0, 4)), rating: null, poster: null, premiereRu: null },
-  ];
+async function loadDiscovery(kind, month) {
+  const query = kind === "popular" ? "kind=popular" : `kind=premieres&month=${encodeURIComponent(month)}`;
+  const now = Date.now();
+  for (const [key, entry] of discoveryCache) if (now - entry.loadedAt >= 3600000) discoveryCache.delete(key);
+  const entry = discoveryCache.get(query);
+  if (entry) return { films: entry.films, cached: true };
+  if (location.protocol === "file:") throw Object.assign(new Error("unavailable"), { code: "LOCAL_SERVER" });
+  const response = await fetch(`/api/search-discover?${query}`, { signal: AbortSignal.timeout(12000) });
+  let data;
+  try { data = await response.json(); }
+  catch (error) { if (response.status !== 429) throw error; }
+  if (response.status === 429 && data?.error !== "API_LIMIT") throw Object.assign(new Error("rate limited"), { code: "RATE_LIMITED" });
+  if (!response.ok) throw Object.assign(new Error("request failed"), { code: data?.error });
+  if (!Array.isArray(data?.films)) throw new Error("Invalid discovery response");
+  const films = data.films.slice(0, 20);
+  discoveryCache.set(query, { films, loadedAt: Date.now() });
+  return { films, cached: false };
 }
 
 discoverKind.addEventListener("change", updateDiscoveryFields);
@@ -128,7 +133,7 @@ discoverForm.addEventListener("submit", async (event) => {
     discoverStatus.textContent = "Выберите текущий или предыдущий месяц";
     return;
   }
-  const title = kind === "popular" ? "Популярные сейчас — тестовые данные" : `Премьеры в России: ${selectedMonth.label} — тестовые данные`;
+  const title = kind === "popular" ? "Популярные сейчас" : `Премьеры в России: ${selectedMonth.label}`;
   discoveryLoading = true;
   discoverSubmit.disabled = true;
   discoverResults.setAttribute("aria-busy", "true");
@@ -136,7 +141,7 @@ discoverForm.addEventListener("submit", async (event) => {
   discoverResultsTitle.textContent = title;
   discoverStatus.textContent = "Загружаем подборку…";
   try {
-    const films = await getDemoDiscovery(kind, month);
+    const { films, cached } = await loadDiscovery(kind, month);
     const shown = films.slice(0, 20);
     discoverResults.replaceChildren(...shown.map((film) => {
       const card = createCard(film);
@@ -148,9 +153,16 @@ discoverForm.addEventListener("submit", async (event) => {
       }
       return card;
     }));
-    discoverStatus.textContent = shown.length ? `Показано ${shown.length} фильмов. Данные демонстрационные.` : "В этой подборке пока нет фильмов. Выберите другую подборку или месяц";
-  } catch {
-    discoverStatus.textContent = "Не удалось загрузить подборку. Проверьте соединение и попробуйте снова";
+    discoverStatus.textContent = shown.length ? `Показано ${shown.length} фильмов.${cached ? " Уже загруженная подборка." : ""}` : "В этой подборке пока нет фильмов. Выберите другую подборку или месяц";
+  } catch (error) {
+    const messages = {
+      API_LIMIT: "Лимит API исчерпан. Попробуйте позже",
+      RATE_LIMITED: "Слишком много запросов. Подождите немного и попробуйте снова",
+      UNAVAILABLE: "Подборки временно недоступны",
+      INVALID_SELECTION: "Выберите доступную подборку и месяц заново",
+      LOCAL_SERVER: "Откройте сайт через http://localhost:3000. Инструкция запуска — в README.",
+    };
+    discoverStatus.textContent = Object.hasOwn(messages, error.code) ? messages[error.code] : "Не удалось загрузить подборку. Проверьте соединение и попробуйте снова";
   } finally {
     discoveryLoading = false;
     discoverSubmit.disabled = false;

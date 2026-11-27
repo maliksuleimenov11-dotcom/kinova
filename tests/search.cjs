@@ -1042,65 +1042,80 @@ async function run() {
   assert.deepEqual(idsIn(failedSecondDelete, "watchlist"), [203, 202, 201]);
 
   const discoverSubmit = () => nodes["discover-form"].listeners.submit({ preventDefault() {} });
-  const callsBeforeDiscover = requests;
-  const writesBeforeDiscover = stored.get("kinova.catalog");
-  assert.equal(nodes["discover-results"].children.length, 0);
-  assert.equal(nodes["discover-month-field"].hidden, true);
-  assert.equal(nodes["discover-month"].children.length, 2);
-  const firstDiscover = discoverSubmit();
+  const originalFetch = client.fetch;
+  const savedCatalogBeforeDiscovery = stored.get("kinova.catalog");
+  let discoveryRequests = 0;
+  let discoveryNow = Date.now();
+  const RealDate = vm.runInContext("Date", client);
+  client.Date = class extends Date { static now() { return discoveryNow; } };
+  const discoveryFilms = [
+    { id: 301, nameRu: "Первый", year: 2020, rating: 8, poster: null },
+    { id: 302, nameRu: "Второй", year: null, rating: null, poster: null },
+  ];
+  let discoveryReply = async (url) => ({ ok: true, status: 200, json: async () => ({ films: discoveryFilms.map((film) => url.includes("premieres") ? { ...film, rating: null, premiereRu: nodes["discover-month"].value + "-12" } : film) }) });
+  client.fetch = async (url, options) => { discoveryRequests++; assert(url.startsWith("/api/search-discover?kind=")); assert(options.signal); return discoveryReply(url); };
+  assert.equal(discoveryRequests, 0);
+  const loadingDiscovery = discoverSubmit();
   assert.equal(nodes["discover-submit"].disabled, true);
-  assert.equal(nodes["discover-status"].textContent, "Загружаем подборку…");
   await discoverSubmit();
-  await firstDiscover;
+  await loadingDiscovery;
+  assert.equal(discoveryRequests, 1);
   assert.equal(nodes["discover-results"].children.length, 2);
-  assert.equal(nodes["discover-results"].children[0].children.length, 3); // Без кнопок каталога.
-  assert.equal(nodes["discover-results"].children[1].children[2].children[0].textContent, "Год не указан");
+  assert.equal(nodes["discover-results"].children[0].children.length, 3);
+  await discoverSubmit();
+  assert.equal(discoveryRequests, 1);
+  assert(nodes["discover-status"].textContent.includes("Уже загруженная подборка"));
   const popularHeading = nodes["discover-results-title"].textContent;
   nodes["discover-kind"].value = "premieres";
   nodes["discover-kind"].listeners.change();
-  assert.equal(nodes["discover-month-field"].hidden, false);
   assert.equal(nodes["discover-results-title"].textContent, popularHeading);
+  assert.equal(discoveryRequests, 1);
   const monthValue = nodes["discover-month"].children[1].value;
   nodes["discover-month"].value = monthValue;
-  nodes["discover-month"].listeners.change();
   await discoverSubmit();
-  assert(nodes["discover-results-title"].textContent.includes("Премьеры в России"));
+  assert.equal(discoveryRequests, 2);
   assert.equal(nodes["discover-results"].children[0].children[3].textContent, `Премьера в России: 12.${monthValue.slice(5)}.${monthValue.slice(0, 4)}`);
   assert.equal(nodes["discover-results"].children[0].children[2].children[1].textContent, "Нет рейтинга");
-  assert.equal(nodes["discover-results"].children[1].children[3].textContent, "Дата премьеры не указана");
-  assert.equal(requests, callsBeforeDiscover);
-  assert.equal(stored.get("kinova.catalog"), writesBeforeDiscover);
-  const monthCases = [
-    ["2026-12-31T18:59:59Z", ["2026-12", "2026-11"]],
-    ["2026-12-31T19:00:00Z", ["2027-01", "2026-12"]],
-    ["2028-02-29T19:00:00Z", ["2028-03", "2028-02"]],
-  ];
-  for (const [date, expected] of monthCases) {
-    const actual = vm.runInContext(`JSON.stringify(getDiscoveryMonths(new Date(${JSON.stringify(date)})).map(item => item.value))`, client);
-    assert.deepEqual(JSON.parse(actual), expected);
+  const monthCases = [["2026-12-31T18:59:59Z", ["2026-12", "2026-11"]], ["2026-12-31T19:00:00Z", ["2027-01", "2026-12"]], ["2028-02-29T19:00:00Z", ["2028-03", "2028-02"]]];
+  for (const [date, expected] of monthCases) assert.deepEqual(JSON.parse(vm.runInContext(`JSON.stringify(getDiscoveryMonths(new Date(${JSON.stringify(date)})).map(item => item.value))`, client)), expected);
+  nodes["discover-kind"].value = "popular";
+  nodes["discover-kind"].listeners.change();
+  discoveryNow += 3599999;
+  await discoverSubmit();
+  assert.equal(discoveryRequests, 2);
+  discoveryNow++;
+  await discoverSubmit();
+  assert.equal(discoveryRequests, 3);
+  for (const [reply, expected] of [
+    [async () => ({ ok: false, status: 429, json: async () => { throw new SyntaxError("HTML"); } }), "Слишком много запросов"],
+    [async () => ({ ok: false, status: 429, json: async () => ({ error: "API_LIMIT" }) }), "Лимит API исчерпан"],
+    [async () => ({ ok: false, status: 503, json: async () => ({ error: "UNAVAILABLE" }) }), "Подборки временно недоступны"],
+    [async () => { throw new Error("network"); }, "Не удалось загрузить подборку"],
+    [async () => ({ ok: true, status: 200, json: async () => ({ other: true }) }), "Не удалось загрузить подборку"],
+  ]) {
+    vm.runInContext("discoveryCache.clear()", client);
+    discoveryReply = reply;
+    const before = discoveryRequests;
+    await discoverSubmit();
+    assert(nodes["discover-status"].textContent.startsWith(expected));
+    await discoverSubmit();
+    assert.equal(discoveryRequests, before + 2);
+    assert.equal(nodes["discover-submit"].disabled, false);
   }
-  const originalDemoDiscovery = client.getDemoDiscovery;
-  client.getDemoDiscovery = async () => [];
+  discoveryReply = async () => ({ ok: true, status: 200, json: async () => ({ films: [] }) });
   await discoverSubmit();
   assert(nodes["discover-status"].textContent.startsWith("В этой подборке пока нет фильмов"));
-  client.getDemoDiscovery = async () => { throw new Error("simulated"); };
+  const beforeEmptyCache = discoveryRequests;
   await discoverSubmit();
-  assert(nodes["discover-status"].textContent.startsWith("Не удалось загрузить подборку"));
-  assert.equal(nodes["discover-submit"].disabled, false);
-  client.getDemoDiscovery = async () => Array.from({ length: 25 }, (_, index) => ({ id: index + 1, nameRu: "Тест" }));
+  assert.equal(discoveryRequests, beforeEmptyCache);
+  vm.runInContext("discoveryCache.clear()", client);
+  discoveryReply = async () => ({ ok: true, status: 200, json: async () => ({ films: Array.from({ length: 25 }, (_, index) => ({ id: index + 1, nameRu: "Тест" })) }) });
   await discoverSubmit();
   assert.equal(nodes["discover-results"].children.length, 20);
-  client.getDemoDiscovery = originalDemoDiscovery;
-  assert.equal(requests, callsBeforeDiscover);
-  const RealDate = vm.runInContext("Date", client);
-  client.Date = class extends Date { constructor(value) { super(value ?? "2027-01-15T00:00:00Z"); } };
-  nodes["discover-kind"].listeners.change();
-  nodes["discover-month"].value = "2026-12";
-  client.Date = class extends Date { constructor(value) { super(value ?? "2027-02-01T00:00:00Z"); } };
-  await discoverSubmit();
-  assert(nodes["discover-status"].textContent.startsWith("Список месяцев обновился"));
-  assert.equal(nodes["discover-month"].value, "2027-02");
+  assert.equal(stored.get("kinova.catalog"), savedCatalogBeforeDiscovery);
+  client.fetch = originalFetch;
   client.Date = RealDate;
+  await require("./discover.cjs")();
 
   let timer;
   let timeoutMs;

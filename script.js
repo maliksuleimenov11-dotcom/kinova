@@ -12,6 +12,8 @@ let catalog = new Map();
 const storageKey = "kinova.catalog";
 let catalogLocked = false;
 const storageStatus = document.querySelector("#storage-status");
+const exportButton = document.querySelector("#catalog-export");
+const exportStatus = document.querySelector("#catalog-export-status");
 const catalogLists = [
   { status: "planned", id: "watchlist", title: "Хочу посмотреть", action: "Уже посмотрел", target: "watched" },
   { status: "watched", id: "watched", title: "Просмотрено", action: "Хочу пересмотреть", target: "planned" },
@@ -136,6 +138,35 @@ function saveCatalog(next) {
   storageStatus.textContent = "";
   return true;
 }
+
+function exportCatalog() {
+  if (catalogLocked) return;
+  let objectUrl;
+  let link;
+  try {
+    // Экспортируем сохранённые записи, а не видимые карточки или черновик формы.
+    const data = { version: 2, films: Array.from(catalog.values()).map(normalizeFilm) };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
+    objectUrl = URL.createObjectURL(blob);
+    const date = new Date();
+    const day = [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
+    link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = `kinova-catalog-${day}.json`;
+    link.hidden = true;
+    document.body.append(link);
+    link.click();
+    exportStatus.textContent = "Файл подготовлен и передан браузеру для скачивания. Вы можете сохранить его или отменить скачивание.";
+  } catch {
+    exportStatus.textContent = "Не удалось подготовить файл. Попробуйте ещё раз";
+  } finally {
+    link?.remove();
+    // Даём браузеру начать загрузку, затем освобождаем временный адрес файла.
+    if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  }
+}
+
+exportButton.addEventListener("click", exportCatalog);
 
 function renderCatalog(focusId) {
   const editorFocus = ratingEditor?.form.contains?.(document.activeElement) ? document.activeElement : null;
@@ -363,6 +394,7 @@ function createCard(film) {
 }
 
 restoreCatalog();
+exportButton.disabled = catalogLocked;
 renderCatalog();
 
 input.addEventListener("input", () => {

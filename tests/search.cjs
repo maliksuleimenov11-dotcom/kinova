@@ -20,7 +20,7 @@ function element() {
 }
 
 async function run() {
-  const nodes = Object.fromEntries(["search-form", "query", "input-error", "search-status", "results", "result-count", "watchlist", "watchlist-count", "watchlist-empty", "watched", "watched-count", "watched-empty", "catalog-status", "storage-status", "catalog-search-form", "catalog-query", "catalog-search-error", "catalog-search-status", "catalog-search-reset"].map((id) => [id, element()]));
+  const nodes = Object.fromEntries(["search-form", "query", "input-error", "search-status", "results", "result-count", "watchlist", "watchlist-count", "watchlist-empty", "watched", "watched-count", "watched-empty", "catalog-status", "storage-status", "catalog-search-form", "catalog-query", "catalog-search-error", "catalog-search-status", "catalog-search-reset", "catalog-export", "catalog-export-status"].map((id) => [id, element()]));
   const stored = new Map([["unrelated", "keep"]]);
   let writeFails = false;
   const storage = {
@@ -557,6 +557,86 @@ async function run() {
   assert.deepEqual(visibleIds("watchlist"), [102]);
   assert.equal(localNodes["watchlist-count"].textContent, "1");
   assert.equal(localPage.networkCalls(), 0);
+
+  // Выгрузка всех сохранённых данных, без черновика и без сети.
+  const exportRaw = JSON.stringify({ version: 2, films: [
+    { ...validFilm, personalRating: 8, review: "Сохранённый отзыв", unexpectedField: "do-not-export" },
+    { ...validFilm, id: 12, nameRu: "Другой фильм", status: "watched", personalRating: 10, review: "Вторая запись" },
+  ] });
+  const exportPage = storagePage(exportRaw);
+  const links = [];
+  const blobs = [];
+  const released = [];
+  const cleanup = [];
+  let failDownload = false;
+  const mockURL = class extends URL {
+    static createObjectURL(blob) { blobs.push(blob); return `blob:test-${blobs.length}`; }
+    static revokeObjectURL(url) { released.push(url); }
+  };
+  exportPage.context.URL = mockURL;
+  exportPage.context.Blob = Blob;
+  exportPage.context.Date = class extends Date { constructor() { super(2026, 10, 27, 23, 30); } };
+  exportPage.context.setTimeout = (callback) => { cleanup.push(callback); };
+  exportPage.context.document.body = { append(link) { links.push(link); } };
+  const createElement = exportPage.context.document.createElement;
+  exportPage.context.document.createElement = (tag) => {
+    const item = createElement(tag);
+    if (tag === "a") {
+      item.click = () => { if (failDownload) throw new Error("download failed"); item.clicked = true; };
+      item.remove = () => { item.removed = true; };
+    }
+    return item;
+  };
+  exportPage.nodes.watchlist.children[0].children[5].listeners.click();
+  const exportDraft = exportPage.nodes.watchlist.children[0].children[6];
+  exportDraft.children[5].value = "Несохранённый черновик";
+  exportPage.nodes["catalog-query"].value = "Другой";
+  exportPage.nodes["catalog-search-form"].listeners.submit({ preventDefault() {} });
+  assert.equal(exportPage.nodes.watchlist.children[0].hidden, true);
+  exportPage.nodes["catalog-export"].listeners.click();
+  const downloaded = JSON.parse(await blobs[0].text());
+  assert.equal(downloaded.version, 2);
+  assert.deepEqual(downloaded.films.map((film) => film.id), [11, 12]);
+  assert.equal(downloaded.films[0].personalRating, 8);
+  assert.equal(downloaded.films[0].review, "Сохранённый отзыв");
+  assert.equal(downloaded.films[1].status, "watched");
+  assert.equal(downloaded.films[1].personalRating, 10);
+  assert(!("unexpectedField" in downloaded.films[0]));
+  assert.equal(links[0].download, "kinova-catalog-2026-11-27.json");
+  assert.equal(links[0].clicked, true);
+  assert.equal(links[0].removed, true);
+  assert.equal(blobs[0].type, "application/json;charset=utf-8");
+  assert.equal(exportPage.values.get("kinova.catalog"), exportRaw);
+  assert.equal(exportPage.values.get("unrelated"), "keep");
+  assert.equal(exportPage.nodes.watchlist.children[0].children[6], exportDraft);
+  assert.equal(exportDraft.children[5].value, "Несохранённый черновик");
+  assert.equal(exportPage.writes(), 0);
+  assert.equal(exportPage.networkCalls(), 0);
+  cleanup.shift()();
+  assert.deepEqual(released, ["blob:test-1"]);
+  failDownload = true;
+  exportPage.nodes["catalog-export"].listeners.click();
+  assert.equal(exportPage.nodes["catalog-export-status"].textContent, "Не удалось подготовить файл. Попробуйте ещё раз");
+  assert.equal(links[1].removed, true);
+  cleanup.shift()();
+  assert.equal(released.length, 2);
+  failDownload = false;
+  exportPage.nodes["catalog-export"].listeners.click();
+  assert(exportPage.nodes["catalog-export-status"].textContent.startsWith("Файл подготовлен"));
+  cleanup.shift()();
+  const emptyExport = storagePage(null);
+  emptyExport.context.Blob = Blob;
+  emptyExport.context.URL = mockURL;
+  emptyExport.context.setTimeout = (callback) => cleanup.push(callback);
+  emptyExport.context.document.body = exportPage.context.document.body;
+  emptyExport.context.document.createElement = exportPage.context.document.createElement;
+  emptyExport.nodes["catalog-export"].listeners.click();
+  assert.equal(JSON.parse(await blobs[blobs.length - 1].text()).films.length, 0);
+  cleanup.shift()();
+  const lockedExport = storagePage("{broken");
+  assert.equal(lockedExport.nodes["catalog-export"].disabled, true);
+  lockedExport.nodes["catalog-export"].listeners.click();
+  assert.equal(lockedExport.values.get("kinova.catalog"), "{broken");
 
   let timer;
   let timeoutMs;

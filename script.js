@@ -50,6 +50,48 @@ const discoverStatus = document.querySelector("#discover-status");
 const discoverResultsTitle = document.querySelector("#discover-results-title");
 let discoveryLoading = false;
 let discoveryMonthSignature = "";
+let discoveryFilms = [];
+let discoveryLoadedKind = "popular";
+
+function appendCatalogActions(card, film, source) {
+  if (catalog.has(film.id)) {
+    const label = document.createElement("p");
+    label.className = "film-status";
+    label.textContent = `В списке „${catalogLists.find((list) => list.status === catalog.get(film.id).status).title}“`;
+    label.tabIndex = -1;
+    card.append(label);
+    return label;
+  }
+  if (Number.isSafeInteger(film.id) && film.id > 0) {
+    for (const list of catalogLists) {
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "film-action";
+      add.textContent = list.title;
+      add.disabled = catalogChangesBlocked();
+      add.addEventListener("click", () => addToCatalog(film, list.status, source));
+      card.append(add);
+    }
+  }
+  return null;
+}
+
+function renderDiscovery(focusId) {
+  let focusTarget;
+  discoverResults.replaceChildren(...discoveryFilms.map((film) => {
+    const card = createCard(film);
+    if (discoveryLoadedKind === "premieres") {
+      const date = document.createElement("p");
+      date.className = "premiere-date";
+      date.textContent = film.premiereRu ? `Премьера в России: ${film.premiereRu.split("-").reverse().join(".")}` : "Дата премьеры не указана";
+      card.append(date);
+    }
+    const label = appendCatalogActions(card, film, "discover");
+    if (film.id === focusId && !focusTarget) focusTarget = label;
+    return card;
+  }));
+  focusTarget?.focus();
+}
 
 function getDiscoveryMonths(now = new Date()) {
   const shifted = new Date(now.getTime() + 5 * 60 * 60 * 1000);
@@ -138,21 +180,15 @@ discoverForm.addEventListener("submit", async (event) => {
   discoverSubmit.disabled = true;
   discoverResults.setAttribute("aria-busy", "true");
   discoverResults.replaceChildren();
+  discoveryFilms = [];
   discoverResultsTitle.textContent = title;
   discoverStatus.textContent = "Загружаем подборку…";
   try {
     const { films, cached } = await loadDiscovery(kind, month);
     const shown = films.slice(0, 20);
-    discoverResults.replaceChildren(...shown.map((film) => {
-      const card = createCard(film);
-      if (kind === "premieres") {
-        const date = document.createElement("p");
-        date.className = "premiere-date";
-        date.textContent = film.premiereRu ? `Премьера в России: ${film.premiereRu.split("-").reverse().join(".")}` : "Дата премьеры не указана";
-        card.append(date);
-      }
-      return card;
-    }));
+    discoveryFilms = shown;
+    discoveryLoadedKind = kind;
+    renderDiscovery();
     discoverStatus.textContent = shown.length ? `Показано ${shown.length} фильмов.${cached ? " Уже загруженная подборка." : ""}` : "В этой подборке пока нет фильмов. Выберите другую подборку или месяц";
   } catch (error) {
     const messages = {
@@ -563,6 +599,7 @@ function renderCatalog(focusId) {
   applyCatalogSearch();
   updateImportControls();
   renderUndo();
+  renderDiscovery();
   focusTarget?.focus();
   if (!focusTarget) editorFocus?.focus();
 }
@@ -671,39 +708,25 @@ function renderSearch(focusId) {
   let focusTarget;
   results.replaceChildren(...searchFilms.map((film) => {
     const card = createCard(film);
-    if (catalog.has(film.id)) {
-      const label = document.createElement("p");
-      label.className = "film-status";
-      label.textContent = `В списке „${catalogLists.find((list) => list.status === catalog.get(film.id).status).title}“`;
-      label.tabIndex = -1;
-      card.append(label);
-      if (film.id === focusId && !focusTarget) focusTarget = label;
-    } else if (Number.isSafeInteger(film.id) && film.id > 0) {
-      for (const list of catalogLists) {
-        const add = document.createElement("button");
-        add.type = "button";
-        add.className = "film-action";
-        add.textContent = list.title;
-        add.disabled = catalogChangesBlocked();
-        add.addEventListener("click", () => addToCatalog(film, list.status));
-        card.append(add);
-      }
-    }
+    const label = appendCatalogActions(card, film, "search");
+    if (film.id === focusId && !focusTarget) focusTarget = label;
     return card;
   }));
   focusTarget?.focus();
 }
 
-function addToCatalog(film, target) {
+function addToCatalog(film, target, source = "search") {
   if (catalogChangesBlocked()) return;
   if (!Number.isSafeInteger(film.id) || film.id <= 0 || catalog.has(film.id)) return;
   const list = catalogLists.find((item) => item.status === target);
   if (!list) return;
   const next = new Map(catalog);
-  next.set(film.id, { ...film, status: target });
+  // Дата премьеры остаётся в подборке, формат личного каталога не расширяем.
+  next.set(film.id, normalizeFilm({ ...film, status: target }));
   if (!saveCatalog(next)) return;
   renderCatalog();
-  renderSearch(film.id);
+  renderSearch(source === "search" ? film.id : undefined);
+  if (source === "discover") renderDiscovery(film.id);
   catalogStatus.textContent = `Фильм добавлен в „${list.title}“`;
 }
 

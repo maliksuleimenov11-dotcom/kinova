@@ -1041,6 +1041,69 @@ async function run() {
   failedSecondDelete.nodes["catalog-undo"].listeners.click();
   assert.deepEqual(idsIn(failedSecondDelete, "watchlist"), [203, 202, 201]);
 
+  // Подборка и обычный поиск используют один каталог, даже при повторном показе из кеша.
+  const linkedDiscovery = storagePage(null);
+  linkedDiscovery.nodes["discover-kind"].value = "popular";
+  const showLinked = () => linkedDiscovery.nodes["discover-form"].listeners.submit({ preventDefault() {} });
+  const linkedCard = () => linkedDiscovery.nodes["discover-results"].children[0];
+  await showLinked();
+  linkedDiscovery.nodes.query.value = "Проверка";
+  await linkedDiscovery.nodes["search-form"].listeners.submit({ preventDefault() {} });
+  const staleAdd = linkedCard().children[3];
+  staleAdd.listeners.click();
+  assert.equal(linkedCard().children[3].textContent, "В списке „Хочу посмотреть“");
+  assert.equal(linkedCard().children[3].focused, true);
+  assert.equal(linkedDiscovery.nodes.results.children[0].children[3].textContent, "В списке „Хочу посмотреть“");
+  const linkedWrites = linkedDiscovery.writes();
+  staleAdd.listeners.click();
+  assert.equal(linkedDiscovery.writes(), linkedWrites);
+  vm.runInContext('moveFilm(90, "watched")', linkedDiscovery.context);
+  assert.equal(linkedCard().children[3].textContent, "В списке „Просмотрено“");
+  vm.runInContext('deleteFilm(90)', linkedDiscovery.context);
+  assert.equal(linkedCard().children.length, 5);
+  linkedDiscovery.failWrite(true);
+  linkedCard().children[4].listeners.click();
+  assert.equal(linkedDiscovery.nodes["catalog-undo-panel"].hidden, false);
+  assert.equal(linkedCard().children.length, 5);
+  linkedDiscovery.failWrite(false);
+  linkedDiscovery.nodes["catalog-undo"].listeners.click();
+  assert.equal(linkedCard().children[3].textContent, "В списке „Просмотрено“");
+  await showLinked();
+  assert.equal(linkedDiscovery.networkCalls(), 2);
+  assert.equal(linkedCard().children[3].textContent, "В списке „Просмотрено“");
+  vm.runInContext('deleteFilm(90)', linkedDiscovery.context);
+  await loadImport(linkedDiscovery, JSON.stringify({ version: 2, films: [{ ...validFilm, id: 90, status: "watched" }] }));
+  assert.equal(linkedCard().children[3].disabled, true);
+  linkedDiscovery.nodes["catalog-import-confirm"].listeners.click();
+  assert.equal(linkedCard().children[3].textContent, "В списке „Просмотрено“");
+  vm.runInContext('deleteFilm(90)', linkedDiscovery.context);
+  linkedCard().children[3].listeners.click();
+  assert.equal(linkedDiscovery.nodes["catalog-undo-panel"].hidden, true);
+  assert.equal(JSON.parse(linkedDiscovery.values.get("kinova.catalog")).films.length, 1);
+  const linkedReload = storagePage(linkedDiscovery.values.get("kinova.catalog"));
+  assert.equal(linkedReload.nodes.watchlist.children.length, 1);
+
+  const draftDiscovery = storagePage(JSON.stringify({ version: 2, films: [validFilm] }));
+  vm.runInContext('openRatingEditor(11)', draftDiscovery.context);
+  const discoveryDraft = draftDiscovery.nodes.watchlist.children[0].children[6];
+  discoveryDraft.children[5].value = "Несохранённый отзыв";
+  draftDiscovery.nodes["discover-kind"].value = "popular";
+  await draftDiscovery.nodes["discover-form"].listeners.submit({ preventDefault() {} });
+  draftDiscovery.nodes["discover-results"].children[0].children[3].listeners.click();
+  assert.equal(draftDiscovery.nodes.watchlist.children.find((card) => card.dataset.filmId === 11).children[6], discoveryDraft);
+  assert.equal(discoveryDraft.children[5].value, "Несохранённый отзыв");
+
+  const premiereCatalog = storagePage(null);
+  premiereCatalog.nodes["discover-kind"].value = "premieres";
+  premiereCatalog.respond(async () => ({ ok: true, json: async () => ({ films: [{ ...validFilm, id: 91, status: undefined, rating: null, premiereRu: "2026-11-12" }] }) }));
+  await premiereCatalog.nodes["discover-form"].listeners.submit({ preventDefault() {} });
+  premiereCatalog.nodes["discover-results"].children[0].children[5].listeners.click();
+  const savedPremiere = JSON.parse(premiereCatalog.values.get("kinova.catalog")).films[0];
+  assert.equal(savedPremiere.status, "watched");
+  assert.equal(savedPremiere.rating, null);
+  assert.equal(Object.hasOwn(savedPremiere, "premiereRu"), false);
+  assert.equal(premiereCatalog.networkCalls(), 1);
+
   const discoverSubmit = () => nodes["discover-form"].listeners.submit({ preventDefault() {} });
   const originalFetch = client.fetch;
   const savedCatalogBeforeDiscovery = stored.get("kinova.catalog");
@@ -1061,7 +1124,7 @@ async function run() {
   await loadingDiscovery;
   assert.equal(discoveryRequests, 1);
   assert.equal(nodes["discover-results"].children.length, 2);
-  assert.equal(nodes["discover-results"].children[0].children.length, 3);
+  assert.equal(nodes["discover-results"].children[0].children.length, 5);
   await discoverSubmit();
   assert.equal(discoveryRequests, 1);
   assert(nodes["discover-status"].textContent.includes("Уже загруженная подборка"));

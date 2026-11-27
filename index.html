@@ -60,6 +60,11 @@
       </form>
       <p id="catalog-search-status" class="status" role="status" aria-live="polite"></p>
       <p id="catalog-status" role="status" aria-live="polite"></p>
+      <p id="catalog-delete-status" class="status" role="status" aria-live="polite"></p>
+      <div id="catalog-undo-panel" hidden>
+        <button id="catalog-undo" type="button">Отменить удаление</button>
+        <p class="demo-note">Отмена доступна до следующего сохранённого изменения каталога или перезагрузки страницы.</p>
+      </div>
       <h3>Хочу посмотреть <span id="watchlist-count">0</span></h3>
       <p id="watchlist-empty" class="status">Пока нет фильмов. Добавьте фильм из поиска</p>
       <div id="watchlist" class="film-grid"></div>

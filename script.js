@@ -11,6 +11,11 @@ let searching = false;
 let catalog = new Map();
 const storageKey = "kinova.catalog";
 let catalogLocked = false;
+let knownCatalogRaw = null;
+let lastDeletion = null;
+const deleteStatus = document.querySelector("#catalog-delete-status");
+const undoPanel = document.querySelector("#catalog-undo-panel");
+const undoButton = document.querySelector("#catalog-undo");
 const storageStatus = document.querySelector("#storage-status");
 const exportButton = document.querySelector("#catalog-export");
 const exportStatus = document.querySelector("#catalog-export-status");
@@ -246,6 +251,7 @@ function restoreCatalog() {
   let raw;
   try {
     raw = localStorage.getItem(storageKey);
+    knownCatalogRaw = raw;
   } catch {
     catalogLocked = true;
     storageStatus.textContent = "Не удалось прочитать каталог. Проверьте доступ к хранилищу и перезагрузите страницу";
@@ -273,16 +279,81 @@ function restoreCatalog() {
 function saveCatalog(next) {
   if (catalogChangesBlocked()) return false;
   try {
-    localStorage.setItem(storageKey, JSON.stringify({ version: 2, films: Array.from(next.values()).map(normalizeFilm) }));
+    const serialized = JSON.stringify({ version: 2, films: Array.from(next.values()).map(normalizeFilm) });
+    localStorage.setItem(storageKey, serialized);
+    knownCatalogRaw = serialized;
   } catch {
     catalogStatus.textContent = "";
     storageStatus.textContent = "Не удалось сохранить изменения. Проверьте доступ к хранилищу браузера и попробуйте снова";
     return false;
   }
   catalog = next;
+  lastDeletion = null;
+  deleteStatus.textContent = "";
+  renderUndo();
   storageStatus.textContent = "";
   return true;
 }
+
+function renderUndo() {
+  if (catalogLocked) lastDeletion = null;
+  undoPanel.hidden = lastDeletion === null;
+  undoButton.disabled = catalogChangesBlocked() || lastDeletion === null;
+}
+
+function checkDeletionStorage() {
+  try {
+    if (localStorage.getItem(storageKey) === knownCatalogRaw) return true;
+  } catch {
+    deleteStatus.textContent = "Не удалось проверить хранилище. Проверьте доступ и попробуйте снова";
+    return false;
+  }
+  catalogLocked = true;
+  exportButton.disabled = true;
+  lastDeletion = null;
+  storageStatus.textContent = "Каталог изменился в другой вкладке. Перезагрузите страницу. Данные не перезаписаны";
+  refreshImportState();
+  return false;
+}
+
+function deleteFilm(id) {
+  if (catalogChangesBlocked() || ratingEditor?.id === id || !catalog.has(id)) return;
+  if (!checkDeletionStorage()) return;
+  const film = catalog.get(id);
+  const before = new Map(catalog);
+  const next = new Map(catalog);
+  next.delete(id);
+  if (!saveCatalog(next)) {
+    deleteStatus.textContent = "Не удалось удалить фильм. Проверьте доступ к хранилищу и попробуйте снова";
+    return;
+  }
+  lastDeletion = { id, before };
+  renderCatalog();
+  renderSearch();
+  catalogStatus.textContent = "";
+  deleteStatus.textContent = `Фильм „${film.nameRu || film.nameOriginal || "Без названия"}“ удалён`;
+  undoButton.focus();
+}
+
+undoButton.addEventListener("click", () => {
+  if (catalogChangesBlocked() || !lastDeletion) return;
+  if (!checkDeletionStorage()) return;
+  const deletion = lastDeletion;
+  if (!saveCatalog(new Map(deletion.before))) {
+    deleteStatus.textContent = "Не удалось отменить удаление. Проверьте доступ к хранилищу и попробуйте снова";
+    return;
+  }
+  renderCatalog();
+  renderSearch();
+  catalogStatus.textContent = "";
+  deleteStatus.textContent = "Удаление отменено";
+  const film = catalog.get(deletion.id);
+  const list = catalogLists.find((item) => item.status === film.status);
+  const card = Array.from(document.querySelector(`#${list.id}`).children).find((item) => Number(item.dataset.filmId) === deletion.id);
+  const remove = card && !card.hidden ? Array.from(card.children).find((item) => item.dataset?.action === "delete") : null;
+  if (remove) remove.focus();
+  else document.querySelector("#catalog-title").focus();
+});
 
 function exportCatalog() {
   if (catalogLocked) return;
@@ -344,6 +415,15 @@ function renderCatalog(focusId) {
         review.textContent = `Мой отзыв: ${film.review}`;
         card.append(review);
       }
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "film-action film-remove";
+      remove.dataset.action = "delete";
+      remove.textContent = "Удалить из каталога";
+      remove.disabled = catalogChangesBlocked() || ratingEditor?.id === film.id;
+      if (ratingEditor?.id === film.id) remove.title = "Сначала сохраните или отмените редактирование фильма";
+      remove.addEventListener("click", () => deleteFilm(film.id));
+      card.append(remove);
       if (film.id === focusId) focusTarget = move;
       return card;
     }));
@@ -352,6 +432,7 @@ function renderCatalog(focusId) {
   }
   applyCatalogSearch();
   updateImportControls();
+  renderUndo();
   focusTarget?.focus();
   if (!focusTarget) editorFocus?.focus();
 }

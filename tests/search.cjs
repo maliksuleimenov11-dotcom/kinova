@@ -24,6 +24,9 @@ async function run() {
   const stored = new Map([["unrelated", "keep"]]);
   nodes["catalog-import-confirm"] = element();
   nodes["catalog-title"] = element();
+  nodes["catalog-delete-status"] = element();
+  nodes["catalog-undo-panel"] = element();
+  nodes["catalog-undo"] = element();
   let writeFails = false;
   const storage = {
     getItem(key) { return stored.get(key) ?? null; },
@@ -811,6 +814,76 @@ async function run() {
   assert.equal(reopenedTransfer.writes(), 0);
   assert.equal(reopenedTransfer.values.get("kinova.catalog"), transferredRaw);
   assert.equal(reopenedTransfer.values.get("unrelated"), "keep");
+
+  const deletionRows = [
+    { ...validFilm, id: 201, nameRu: "Одинаковое название", personalRating: 7, review: "Первый" },
+    { ...validFilm, id: 202, nameRu: "Средний фильм", personalRating: 9, review: "Вернуть отзыв" },
+    { ...validFilm, id: 203, nameRu: "Одинаковое название", personalRating: 8, review: "Третий" },
+    { ...validFilm, id: 204, nameRu: "Просмотренный", status: "watched", personalRating: 10, review: "Просмотрен" },
+  ];
+  const deletionPage = storagePage(JSON.stringify({ version: 2, films: deletionRows }));
+  const deleteButton = (page, list, id) => page.nodes[list].children.find((card) => card.dataset.filmId === id).children.find((child) => child.dataset?.action === "delete");
+  const idsIn = (page, list) => page.nodes[list].children.map((card) => card.dataset.filmId);
+  const middleDelete = deleteButton(deletionPage, "watchlist", 202).listeners.click;
+  middleDelete();
+  middleDelete();
+  assert.deepEqual(idsIn(deletionPage, "watchlist"), [203, 201]);
+  assert.equal(deletionPage.nodes["watchlist-count"].textContent, "2");
+  assert.equal(deletionPage.nodes["catalog-undo-panel"].hidden, false);
+  assert.equal(deletionPage.nodes["catalog-undo"].focused, true);
+  assert.equal(deletionPage.nodes["catalog-delete-status"].textContent, "Фильм „Средний фильм“ удалён");
+  assert.equal(deletionPage.writes(), 1);
+  const afterDeletionRaw = deletionPage.values.get("kinova.catalog");
+  const deletionReload = storagePage(afterDeletionRaw);
+  assert.deepEqual(idsIn(deletionReload, "watchlist"), [203, 201]);
+  assert.equal(deletionReload.nodes["catalog-undo-panel"].hidden, true);
+  deletionPage.failWrite(true);
+  deletionPage.nodes["catalog-undo"].listeners.click();
+  assert.equal(deletionPage.values.get("kinova.catalog"), afterDeletionRaw);
+  assert.deepEqual(idsIn(deletionPage, "watchlist"), [203, 201]);
+  assert.equal(deletionPage.nodes["catalog-undo-panel"].hidden, false);
+  assert(deletionPage.nodes["catalog-delete-status"].textContent.startsWith("Не удалось отменить удаление"));
+  deletionPage.failWrite(false);
+  deletionPage.nodes["catalog-undo"].listeners.click();
+  assert.deepEqual(idsIn(deletionPage, "watchlist"), [203, 202, 201]);
+  assert.equal(deleteButton(deletionPage, "watchlist", 202).focused, true);
+  const restoredDeleted = JSON.parse(deletionPage.values.get("kinova.catalog")).films.find((film) => film.id === 202);
+  assert.equal(restoredDeleted.personalRating, 9);
+  assert.equal(restoredDeleted.review, "Вернуть отзыв");
+  const writesAfterUndo = deletionPage.writes();
+  deletionPage.nodes["catalog-undo"].listeners.click();
+  assert.equal(deletionPage.writes(), writesAfterUndo);
+  const savedBeforeFailedDeletion = deletionPage.values.get("kinova.catalog");
+  deletionPage.failWrite(true);
+  deleteButton(deletionPage, "watchlist", 201).listeners.click();
+  assert.equal(deletionPage.values.get("kinova.catalog"), savedBeforeFailedDeletion);
+  assert.deepEqual(idsIn(deletionPage, "watchlist"), [203, 202, 201]);
+  assert(deletionPage.nodes["catalog-delete-status"].textContent.startsWith("Не удалось удалить фильм"));
+  deletionPage.failWrite(false);
+  deleteButton(deletionPage, "watched", 204).listeners.click();
+  assert.equal(deletionPage.nodes.watched.children.length, 0);
+  assert.equal(deletionPage.nodes["watched-empty"].hidden, false);
+  deletionPage.nodes["catalog-undo"].listeners.click();
+  assert.equal(deletionPage.nodes.watched.children[0].children[4].textContent, "Моя оценка: 10 из 10");
+  assert.equal(deletionPage.nodes.watched.children[0].children[6].textContent, "Мой отзыв: Просмотрен");
+  deleteButton(deletionPage, "watchlist", 201).listeners.click();
+  assert.deepEqual(idsIn(deletionPage, "watchlist"), [203, 202]);
+  assert.equal(deletionPage.networkCalls(), 0);
+  assert.equal(deletionPage.values.get("unrelated"), "keep");
+  const conflictingRaw = JSON.stringify({ version: 2, films: [{ ...validFilm, review: "Другая вкладка" }] });
+  deletionPage.values.set("kinova.catalog", conflictingRaw);
+  const beforeConflict = deletionPage.writes();
+  deletionPage.nodes["catalog-undo"].listeners.click();
+  assert.equal(deletionPage.writes(), beforeConflict);
+  assert.equal(deletionPage.values.get("kinova.catalog"), conflictingRaw);
+  assert.equal(deletionPage.nodes["catalog-undo-panel"].hidden, true);
+  assert(deletionPage.nodes["storage-status"].textContent.includes("Перезагрузите страницу"));
+  assert.equal(deleteButton(deletionPage, "watchlist", 203).disabled, true);
+  const beforeDeleteConflict = storagePage(JSON.stringify({ version: 2, films: deletionRows }));
+  beforeDeleteConflict.values.set("kinova.catalog", conflictingRaw);
+  deleteButton(beforeDeleteConflict, "watchlist", 201).listeners.click();
+  assert.equal(beforeDeleteConflict.writes(), 0);
+  assert.equal(beforeDeleteConflict.values.get("kinova.catalog"), conflictingRaw);
 
   let timer;
   let timeoutMs;
